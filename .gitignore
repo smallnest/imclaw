@@ -34,6 +34,9 @@ go.work.sum
 # Binary output
 bin/
 
+# GoReleaser output
+dist/
+
 # Config files with secrets
 config.json
 config.local.json

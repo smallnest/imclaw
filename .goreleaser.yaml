@@ -1,0 +1,121 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: imclaw
+    main: ./cmd/imclaw
+    binary: imclaw
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.BuildTime={{.Date}}
+
+  - id: imclaw-cli
+    main: ./cmd/imclaw-cli
+    binary: imclaw-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.BuildTime={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - config.example.json
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: smallnest
+    name: imclaw
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## IMClaw {{.Version}} ({{.Date}})
+
+    AI Agent Gateway with ACP Protocol support.
+  footer: |
+    ## Installation
+
+    ### Download binary
+
+    Download the appropriate binary for your platform from the assets below.
+
+    ### Install via go
+
+    ```bash
+    go install github.com/smallnest/imclaw/cmd/imclaw@{{.Version}}
+    go install github.com/smallnest/imclaw/cmd/imclaw-cli@{{.Version}}
+    ```
+
+    ### Homebrew
+
+    ```bash
+    brew tap smallnest/imclaw
+    brew install imclaw
+    ```
+
+brews:
+  - name: imclaw
+    repository:
+      owner: smallnest
+      name: homebrew-imclaw
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/smallnest/imclaw"
+    description: "AI Agent Gateway with ACP Protocol support"
+    license: "MIT"
+    install: |
+      bin.install "imclaw"
+      bin.install "imclaw-cli"
+    test: |
+      system "#{bin}/imclaw --version"
+      system "#{bin}/imclaw-cli --version"
