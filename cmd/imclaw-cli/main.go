@@ -64,6 +64,9 @@ var (
 	// JSON strict mode
 	jsonStrict = flag.Bool("json-strict", false, "Strict JSON mode: requires --format json and suppresses non-JSON stderr output")
 
+	// Streaming mode
+	stream = flag.Bool("stream", true, "Enable streaming output (default: true)")
+
 	// Timeouts
 	timeout = flag.Int("timeout", 0, "Maximum time to wait for agent response (seconds)")
 	ttl     = flag.Int("ttl", 0, "Queue owner idle TTL before shutdown (seconds)")
@@ -363,6 +366,140 @@ func (c *Client) Ask(content string) (*JSONRPCResponse, error) {
 	return &resp, nil
 }
 
+// AskStream sends a message and streams the response
+func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)) (*JSONRPCResponse, error) {
+	if c.conn == nil {
+		if err := c.Connect(); err != nil {
+			return nil, err
+		}
+	}
+
+	params := map[string]interface{}{
+		"content": content,
+	}
+
+	// Add session ID if specified
+	if *sessionID != "" {
+		params["session_id"] = *sessionID
+	}
+
+	// Add agent
+	if *agentType != "" {
+		params["agent"] = *agentType
+	}
+
+	// Add permissions
+	params["permissions"] = getPermissions()
+
+	// Add cwd
+	if *cwd != "" {
+		params["cwd"] = *cwd
+	}
+
+	// Add auth policy
+	if *authPolicy != "" {
+		params["auth_policy"] = *authPolicy
+	}
+
+	// Add non-interactive permissions
+	if *nonInteractivePerms != "" {
+		params["non_interactive_permissions"] = *nonInteractivePerms
+	}
+
+	// Add suppress reads
+	if *suppressReads {
+		params["suppress_reads"] = true
+	}
+
+	// Add model
+	if *model != "" {
+		params["model"] = *model
+	}
+
+	// Add allowed tools
+	if *allowedTools != "" {
+		params["allowed_tools"] = *allowedTools
+	}
+
+	// Add max turns
+	if *maxTurns > 0 {
+		params["max_turns"] = *maxTurns
+	}
+
+	// Add prompt retries
+	if *promptRetries > 0 {
+		params["prompt_retries"] = *promptRetries
+	}
+
+	// Add timeout
+	if *timeout > 0 {
+		params["timeout"] = *timeout
+	}
+
+	// Add ttl
+	if *ttl > 0 {
+		params["ttl"] = *ttl
+	}
+
+	reqID := fmt.Sprintf("%d", time.Now().UnixNano())
+	req := JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      reqID,
+		Method:  "ask_stream",
+		Params:  params,
+	}
+
+	if err := c.conn.WriteJSON(req); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	// Set read deadline based on timeout
+	readTimeout := time.Duration(300) * time.Second
+	if *timeout > 0 {
+		readTimeout = time.Duration(*timeout+30) * time.Second // Add buffer
+	}
+
+	// Read streaming notifications and final response
+	var finalResp JSONRPCResponse
+	for {
+		// Set deadline for each read
+		if err := c.conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			return nil, fmt.Errorf("failed to set read deadline: %w", err)
+		}
+
+		var msg json.RawMessage
+		if err := c.conn.ReadJSON(&msg); err != nil {
+			return nil, fmt.Errorf("failed to read message: %w", err)
+		}
+
+		// Try to parse as notification first
+		var notification JSONRPCRequest
+		if err := json.Unmarshal(msg, &notification); err == nil && notification.Method == "stream" {
+			// It's a streaming notification
+			if params, ok := notification.Params.(map[string]interface{}); ok {
+				chunkType, _ := params["type"].(string)
+				chunkContent, _ := params["content"].(string)
+				if onChunk != nil {
+					onChunk(chunkType, chunkContent)
+				}
+			}
+			continue
+		}
+
+		// Try to parse as response
+		var resp JSONRPCResponse
+		if err := json.Unmarshal(msg, &resp); err == nil && resp.ID == reqID {
+			finalResp = resp
+			break
+		}
+	}
+
+	// Clear read deadline
+	c.conn.SetReadDeadline(time.Time{})
+
+	return &finalResp, nil
+}
+
 // GetSession gets the current session info
 func (c *Client) GetSession(sessionID string) (*JSONRPCResponse, error) {
 	if c.conn == nil {
@@ -460,7 +597,24 @@ func sendAndExit(client *Client, message string) {
 	}
 	defer client.Close()
 
-	resp, err := client.Ask(message)
+	var resp *JSONRPCResponse
+	var err error
+
+	if *stream {
+		// Use streaming mode
+		resp, err = client.AskStream(message, func(chunkType, chunk string) {
+			if chunkType == "error" {
+				fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
+			} else if chunkType == "content" {
+				fmt.Println(chunk)
+			}
+			// "done" type chunks are handled implicitly
+		})
+	} else {
+		// Use non-streaming mode
+		resp, err = client.Ask(message)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -471,14 +625,18 @@ func sendAndExit(client *Client, message string) {
 		os.Exit(1)
 	}
 
-	if result, ok := resp.Result.(map[string]interface{}); ok {
-		if content, ok := result["content"].(string); ok {
-			fmt.Println(content)
+	// In streaming mode, content is already printed via callback
+	// Just print final result in non-streaming mode or if there's additional data
+	if !*stream {
+		if result, ok := resp.Result.(map[string]interface{}); ok {
+			if content, ok := result["content"].(string); ok {
+				fmt.Println(content)
+			} else {
+				printJSON(result)
+			}
 		} else {
-			printJSON(result)
+			printJSON(resp.Result)
 		}
-	} else {
-		printJSON(resp.Result)
 	}
 }
 
@@ -582,7 +740,22 @@ func startREPL(client *Client) {
 			}
 
 			// Send message
-			resp, err := client.Ask(line)
+			var resp *JSONRPCResponse
+			var err error
+
+			if *stream {
+				fmt.Println()
+				resp, err = client.AskStream(line, func(chunkType, chunk string) {
+					if chunkType == "error" {
+						fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
+					} else if chunkType == "content" {
+						fmt.Println(chunk)
+					}
+				})
+			} else {
+				resp, err = client.Ask(line)
+			}
+
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				continue
@@ -593,16 +766,18 @@ func startREPL(client *Client) {
 				continue
 			}
 
-			// Print response
-			fmt.Println()
-			if result, ok := resp.Result.(map[string]interface{}); ok {
-				if content, ok := result["content"].(string); ok {
-					fmt.Println(content)
+			// Print response (in non-streaming mode or for additional data)
+			if !*stream {
+				fmt.Println()
+				if result, ok := resp.Result.(map[string]interface{}); ok {
+					if content, ok := result["content"].(string); ok {
+						fmt.Println(content)
+					} else {
+						printJSON(result)
+					}
 				} else {
-					printJSON(result)
+					printJSON(resp.Result)
 				}
-			} else {
-				printJSON(resp.Result)
 			}
 			fmt.Println()
 		}

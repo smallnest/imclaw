@@ -298,6 +298,12 @@ func (s *Server) handleWSMessages(conn *WSConnection) {
 			continue
 		}
 
+		// Handle ask_stream specially for streaming responses
+		if req.Method == "ask_stream" {
+			s.handleAskStream(conn, &req)
+			continue
+		}
+
 		resp := s.handleRPCRequest(conn.ID, &req)
 		_ = conn.SendJSON(resp)
 	}
@@ -307,6 +313,16 @@ func (s *Server) handleRPCRequest(connID string, req *JSONRPCRequest) *JSONRPCRe
 	switch req.Method {
 	case "ask":
 		return s.handleAsk(connID, req)
+	case "ask_stream":
+		// This is handled separately in handleWSMessages for streaming
+		return &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32601,
+				Message: "ask_stream requires WebSocket connection",
+			},
+		}
 	case "session.init":
 		return s.handleSessionInit(connID, req)
 	case "session.new":
@@ -476,6 +492,152 @@ func (s *Server) handleAsk(connID string, req *JSONRPCRequest) *JSONRPCResponse 
 			"agent":      ag.Type(),
 		},
 	}
+}
+
+// handleAskStream handles streaming ask requests over WebSocket
+func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		_ = conn.SendJSON(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32602,
+				Message: "Invalid params",
+			},
+		})
+		return
+	}
+
+	content, _ := params["content"].(string)
+	agentType, _ := params["agent"].(string)
+	specifiedSessionID := getStringParam(params, "session_id")
+
+	if content == "" {
+		_ = conn.SendJSON(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32602,
+				Message: "Missing required param: content",
+			},
+		})
+		return
+	}
+
+	// Parse prompt options from params
+	opts := &agent.PromptOptions{
+		Permissions:         getStringParam(params, "permissions"),
+		Format:              getStringParam(params, "format"),
+		Cwd:                 getStringParam(params, "cwd"),
+		AuthPolicy:          getStringParam(params, "auth_policy"),
+		NonInteractivePerms: getStringParam(params, "non_interactive_permissions"),
+		SuppressReads:       getBoolParam(params, "suppress_reads"),
+		Model:               getStringParam(params, "model"),
+		AllowedTools:        getStringParam(params, "allowed_tools"),
+		MaxTurns:            getIntParam(params, "max_turns"),
+		PromptRetries:       getIntParam(params, "prompt_retries"),
+		Timeout:             getIntParam(params, "timeout"),
+		TTL:                 getIntParam(params, "ttl"),
+	}
+
+	// Determine session ID
+	var sessionID string
+	if specifiedSessionID != "" {
+		sessionID = specifiedSessionID
+	} else {
+		sessionID = conn.ID
+		if conn.ID == "" {
+			sessionID = "default"
+		}
+	}
+
+	// Get or create session
+	sess := s.sessionMgr.GetOrCreate("cli", "", sessionID, agentType)
+
+	// Determine agent type from session or params
+	effectiveAgentType := agentType
+	if sess.AgentName != "" {
+		effectiveAgentType = sess.AgentName
+	}
+
+	// Get or create agent
+	ag := s.agentMgr.GetOrCreate(effectiveAgentType)
+	log.Printf("[gateway] Streaming with agent: %s (requested: %s, session: %s)", ag.Type(), agentType, sess.AgentName)
+
+	// Ensure agent session exists
+	agentSessionID := sess.AgentSession
+	if agentSessionID == "" {
+		id, err := ag.EnsureSession(context.Background(), sess.ID)
+		if err != nil {
+			_ = conn.SendJSON(JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &JSONRPCError{
+					Code:    -32603,
+					Message: fmt.Sprintf("Failed to create agent session: %v", err),
+				},
+			})
+			return
+		}
+		agentSessionID = sess.ID
+		sess.SetAgentSession(agentSessionID)
+		log.Printf("[gateway] Created agent session, name=%s, acpx_id=%s", sess.ID, id)
+		s.sessionMgr.Update(sess)
+	}
+
+	// Create cancellable context for this request
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start streaming
+	stream, err := ag.PromptStream(ctx, agentSessionID, content, opts)
+	if err != nil {
+		_ = conn.SendJSON(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32603,
+				Message: fmt.Sprintf("Failed to start stream: %v", err),
+			},
+		})
+		return
+	}
+
+	// Stream chunks to client
+	var fullContent strings.Builder
+	for chunk := range stream {
+		fullContent.WriteString(chunk.Content)
+		fullContent.WriteString("\n")
+
+		// Send streaming notification
+		notification := JSONRPCRequest{
+			JSONRPC: "2.0",
+			Method:  "stream",
+			Params: map[string]interface{}{
+				"id":      req.ID,
+				"type":    chunk.Type,
+				"content": chunk.Content,
+			},
+		}
+		if err := conn.SendJSON(notification); err != nil {
+			// WebSocket connection failed, cancel the context
+			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+			cancel()
+			return
+		}
+	}
+
+	// Send final response
+	_ = conn.SendJSON(JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: map[string]interface{}{
+			"content":    strings.TrimSuffix(fullContent.String(), "\n"),
+			"session_id": sess.ID,
+			"agent":      ag.Type(),
+		},
+	})
 }
 
 // Helper functions to parse params

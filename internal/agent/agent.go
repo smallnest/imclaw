@@ -1,15 +1,23 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
+
+// StreamChunk represents a chunk of streaming output
+type StreamChunk struct {
+	Type    string `json:"type"`    // "content", "error", "done"
+	Content string `json:"content"` // The content of the chunk
+}
 
 // Agent represents an AI agent
 type Agent interface {
@@ -30,6 +38,9 @@ type Agent interface {
 
 	// PromptWithOptions sends a prompt with options
 	PromptWithOptions(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (string, error)
+
+	// PromptStream sends a prompt and streams the response
+	PromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error)
 
 	// Close closes the agent
 	Close() error
@@ -348,6 +359,15 @@ func (a *ACPXAgent) PromptWithOptions(ctx context.Context, sessionID, prompt str
 	return a.doPrompt(ctx, sessionID, prompt, opts)
 }
 
+// PromptStream sends a prompt and streams the response
+func (a *ACPXAgent) PromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error) {
+	if opts == nil {
+		opts = &PromptOptions{}
+	}
+
+	return a.doPromptStream(ctx, sessionID, prompt, opts)
+}
+
 func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (string, error) {
 	// Build args in correct order: global options before agent type
 	// acpx [options] <agent> -s <session> <prompt>
@@ -431,6 +451,225 @@ func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts
 	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
 
 	return a.runCommand(ctx, timeout, args...)
+}
+
+// doPromptStream executes the prompt and streams the output
+func (a *ACPXAgent) doPromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error) {
+	// Build args in correct order: global options before agent type
+	args := []string{}
+
+	// Working directory
+	if opts.Cwd != "" {
+		args = append(args, "--cwd", opts.Cwd)
+	}
+
+	// Auth policy
+	if opts.AuthPolicy != "" {
+		args = append(args, "--auth-policy", opts.AuthPolicy)
+	}
+
+	// Permission flags
+	if opts.Permissions != "" {
+		switch opts.Permissions {
+		case "approve-all":
+			args = append(args, "--approve-all")
+		case "approve-reads":
+			args = append(args, "--approve-reads")
+		case "deny-all":
+			args = append(args, "--deny-all")
+		}
+	}
+
+	// Non-interactive permissions
+	if opts.NonInteractivePerms != "" {
+		args = append(args, "--non-interactive-permissions", opts.NonInteractivePerms)
+	}
+
+	// Format - always use text for streaming
+	args = append(args, "--format", "text")
+
+	// Suppress reads
+	if opts.SuppressReads {
+		args = append(args, "--suppress-reads")
+	}
+
+	// Model
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+
+	// Allowed tools
+	if opts.AllowedTools != "" {
+		args = append(args, "--allowed-tools", opts.AllowedTools)
+	}
+
+	// Max turns
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
+	}
+
+	// Prompt retries
+	if opts.PromptRetries > 0 {
+		args = append(args, "--prompt-retries", fmt.Sprintf("%d", opts.PromptRetries))
+	}
+
+	// Timeout
+	timeout := 300
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+		args = append(args, "--timeout", fmt.Sprintf("%d", opts.Timeout))
+	}
+
+	// TTL
+	if opts.TTL > 0 {
+		args = append(args, "--ttl", fmt.Sprintf("%d", opts.TTL))
+	}
+
+	// Agent type and session
+	args = append(args, a.agentType, "-s", sessionID, prompt)
+
+	log.Printf("[acpx] Streaming prompt to session %s (permissions=%s)", sessionID, opts.Permissions)
+	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+
+	return a.runCommandStream(ctx, timeout, args...)
+}
+
+// runCommandStream executes command and streams the output
+func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...string) (<-chan StreamChunk, error) {
+	if timeout == 0 {
+		timeout = 300
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+
+	// Log the command being executed
+	fullCmd := fmt.Sprintf("%s %s", a.command, strings.Join(args, " "))
+	log.Printf("[acpx] Executing (stream): %s", fullCmd)
+
+	cmd := exec.CommandContext(ctx, a.command, args...)
+
+	// Get stdout and stderr pipes
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Create output channel with larger buffer
+	outputCh := make(chan StreamChunk, 200)
+
+	// Goroutine to read and stream output
+	go func() {
+		defer close(outputCh)
+		defer cancel()
+
+		// Ensure process is killed on exit
+		defer func() {
+			if cmd.Process != nil && cmd.ProcessState == nil {
+				cmd.Process.Kill()
+			}
+		}()
+
+		// Read stderr in background
+		stderrDone := make(chan struct{})
+		go func() {
+			defer close(stderrDone)
+			stderrReader := bufio.NewReader(stderr)
+			for {
+				line, err := stderrReader.ReadString('\n')
+				if err != nil {
+					if err != io.EOF {
+						log.Printf("[acpx] stderr error: %v", err)
+					}
+					return
+				}
+				line = strings.TrimSuffix(line, "\n")
+				if line != "" {
+					log.Printf("[acpx] stderr: %s", line)
+				}
+			}
+		}()
+
+		// Read stdout and send chunks
+		reader := bufio.NewReader(stdout)
+		var accumulatedContent strings.Builder
+
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("[acpx] stdout error: %v", err)
+				}
+				break
+			}
+
+			line = strings.TrimSuffix(line, "\n")
+
+			// Skip empty lines and status lines
+			if line == "" || strings.HasPrefix(line, "[acpx]") {
+				log.Printf("[acpx] status: %s", line)
+				continue
+			}
+
+			// Send content chunk
+			accumulatedContent.WriteString(line)
+			accumulatedContent.WriteString("\n")
+
+			select {
+			case outputCh <- StreamChunk{Type: "content", Content: line}:
+				// Successfully sent
+			case <-ctx.Done():
+				// Context cancelled, stop sending
+				return
+			}
+		}
+
+		// Wait for command to complete
+		waitErr := cmd.Wait()
+
+		// Wait for stderr to finish (with timeout protection via context)
+		select {
+		case <-stderrDone:
+		case <-ctx.Done():
+		}
+
+		// Send done or error (with context check to avoid deadlock)
+		if waitErr != nil {
+			// Check if we have accumulated content despite error
+			if accumulatedContent.Len() > 0 {
+				select {
+				case outputCh <- StreamChunk{Type: "done", Content: accumulatedContent.String()}:
+				case <-ctx.Done():
+				}
+			} else {
+				select {
+				case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error()}:
+				case <-ctx.Done():
+				}
+			}
+		} else {
+			select {
+			case outputCh <- StreamChunk{Type: "done", Content: accumulatedContent.String()}:
+			case <-ctx.Done():
+			}
+		}
+
+		log.Printf("[acpx] Stream completed, total bytes: %d", accumulatedContent.Len())
+	}()
+
+	return outputCh, nil
 }
 
 // truncate truncates a string to maxLen characters
