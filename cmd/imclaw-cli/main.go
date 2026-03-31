@@ -20,6 +20,7 @@ import (
 var (
 	// Server connection (HTTP and WebSocket on same port)
 	serverURL = flag.String("server", "ws://localhost:8080/ws", "IMClaw server WebSocket URL")
+	authToken = flag.String("token", "", "Authentication token")
 
 	// Session
 	sessionID = flag.String("session", "", "Session ID to use (empty for auto-create)")
@@ -141,7 +142,7 @@ func main() {
 		message = strings.Join(args, " ")
 	}
 
-	client := NewClient(*serverURL)
+	client := NewClient(*serverURL, *authToken)
 
 	// If message provided, send it and exit
 	if message != "" {
@@ -189,14 +190,15 @@ type JSONRPCError struct {
 
 // Client is the IMClaw client
 type Client struct {
-	wsURL  string
+	wsURL   string
 	httpURL string
-	conn   *websocket.Conn
-	connID string
+	token   string
+	conn    *websocket.Conn
+	connID  string
 }
 
 // NewClient creates a new client
-func NewClient(wsURL string) *Client {
+func NewClient(wsURL, token string) *Client {
 	// Derive HTTP URL from WebSocket URL
 	// ws://host:port/ws -> http://host:port
 	httpURL := strings.Replace(wsURL, "ws://", "http://", 1)
@@ -206,6 +208,7 @@ func NewClient(wsURL string) *Client {
 	return &Client{
 		wsURL:   wsURL,
 		httpURL: httpURL,
+		token:   token,
 	}
 }
 
@@ -214,6 +217,13 @@ func (c *Client) Connect() error {
 	u, err := url.Parse(c.wsURL)
 	if err != nil {
 		return fmt.Errorf("invalid WebSocket URL: %w", err)
+	}
+
+	// Add token to URL if provided
+	if c.token != "" {
+		q := u.Query()
+		q.Set("token", c.token)
+		u.RawQuery = q.Encode()
 	}
 
 	dialer := websocket.DefaultDialer
@@ -413,7 +423,18 @@ func (c *Client) InitSession(sessionID, agentType string) (*JSONRPCResponse, err
 
 // HTTPGet makes a GET request
 func (c *Client) HTTPGet(path string) ([]byte, error) {
-	resp, err := http.Get(c.httpURL + path)
+	req, err := http.NewRequest("GET", c.httpURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add auth token if provided
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
