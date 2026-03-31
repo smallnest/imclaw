@@ -165,36 +165,10 @@ make install-cli
 | `/help` | 显示帮助 |
 | `/quit` | 退出 CLI |
 
-## API 端点
-
-HTTP 和 WebSocket 服务共用同一端口：
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/api/sessions` | GET | 获取所有会话 |
-| `/api/agents` | GET | 获取所有 Agent |
-| `/rpc` | POST | JSON-RPC 接口 |
-| `/ws` | WebSocket | WebSocket 连接 |
-
-## 项目结构
-
-```
-imclaw/
-├── cmd/imclaw/           # 主程序入口
-├── cmd/imclaw-cli/       # CLI 工具
-├── internal/
-│   ├── session/          # 会话管理
-│   ├── agent/            # ACP Agent 集成
-│   └── gateway/          # HTTP/WebSocket 网关
-├── scripts/              # 安装脚本
-├── Makefile
-└── README.md
-```
 
 ## 依赖
 
-- Go 1.21+
+- Go 1.25.0+
 - acpx (用于 ACP 协议支持)
 
 ### 安装 acpx
