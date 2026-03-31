@@ -94,28 +94,3 @@ release:
     go install github.com/smallnest/imclaw/cmd/imclaw@{{.Version}}
     go install github.com/smallnest/imclaw/cmd/imclaw-cli@{{.Version}}
     ```
-
-    ### Homebrew
-
-    ```bash
-    brew tap smallnest/imclaw
-    brew install imclaw
-    ```
-
-brews:
-  - name: imclaw
-    repository:
-      owner: smallnest
-      name: homebrew-imclaw
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
-    homepage: "https://github.com/smallnest/imclaw"
-    description: "AI Agent Gateway with ACP Protocol support"
-    license: "MIT"
-    install: |
-      bin.install "imclaw"
-      bin.install "imclaw-cli"
-    test: |
-      system "#{bin}/imclaw --version"
-      system "#{bin}/imclaw-cli --version"

@@ -24,14 +24,7 @@ go install github.com/smallnest/imclaw/cmd/imclaw@latest
 go install github.com/smallnest/imclaw/cmd/imclaw-cli@latest
 ```
 
-### 方式三：使用 Homebrew（macOS/Linux）
-
-```bash
-brew tap smallnest/imclaw
-brew install imclaw
-```
-
-### 方式四：从源码构建
+### 方式三：从源码构建
 
 ```bash
 # 克隆仓库
