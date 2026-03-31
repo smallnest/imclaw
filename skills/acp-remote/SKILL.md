@@ -2,8 +2,7 @@
 name: acp-remote
 description: Connect to remote ACP server and execute commands via imclaw-cli.
 homepage: https://github.com/smallnest/imclaw
-version: 1.0.0
-metadata: {"clawdbot":{"emoji":"🤖","requires":{"bins":["imclaw-cli"]}}}
+metadata: {"clawdbot":{"emoji":"🤖","requires":{"bins":["imclaw-cli","acpx"]}}}
 ---
 
 # ACP Remote
@@ -12,18 +11,62 @@ Connect to a remote ACP (Agent Client Protocol) server and execute commands usin
 
 ## Prerequisites
 
-1. Install `imclaw-cli`:
-```bash
-# Clone and build
-git clone https://github.com/smallnest/imclaw.git
-cd imclaw
-make build-cli
+### Auto-install dependencies
 
-# Or install to PATH
-make install-cli
+Before using this skill, ensure both `imclaw-cli` and `acpx` are installed. Run these commands to install them automatically:
+
+```bash
+# Install acpx (ACP protocol support)
+if ! command -v acpx &> /dev/null; then
+  npm install -g acpx@latest
+fi
+
+# Install imclaw-cli
+if ! command -v imclaw-cli &> /dev/null; then
+  curl -fsSL https://raw.githubusercontent.com/smallnest/imclaw/main/scripts/install.sh | bash
+fi
 ```
 
-2. Ensure `imclaw-cli` is in your PATH or specify full path.
+### Manual installation
+
+#### Install acpx
+
+```bash
+npm install -g acpx@latest
+```
+
+#### Install imclaw-cli
+
+From GitHub Releases:
+
+```bash
+# 1. Detect your platform
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+[ "$ARCH" = "x86_64" ] && ARCH="amd64"
+[ "$ARCH" = "aarch64" ] && ARCH="arm64"
+
+# 2. Get latest release version
+LATEST=$(curl -s https://api.github.com/repos/smallnest/imclaw/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+
+# 3. Download and extract
+curl -sL "https://github.com/smallnest/imclaw/releases/download/${LATEST}/imclaw_${OS}_${ARCH}.tar.gz" | tar xz -C /tmp
+
+# 4. Install to PATH
+mkdir -p ~/bin
+mv /tmp/imclaw-cli ~/bin/
+chmod +x ~/bin/imclaw-cli
+
+# 5. Ensure ~/bin is in PATH
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc  # or ~/.zshrc
+```
+
+### Verify installation
+
+```bash
+imclaw-cli --help
+acpx --version
+```
 
 ## Configuration
 
@@ -38,6 +81,28 @@ export IMCLAW_TOKEN="your-secret-token"
 ```
 
 Or pass directly via command line.
+
+### Server Configuration
+
+IMClaw server uses command line flags (no config file needed):
+
+```bash
+# Start server with default settings
+imclaw
+
+# Custom port and auth token
+imclaw --port 9000 --token my-secret-token
+
+# Show help
+imclaw --help
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-H, --host` | `0.0.0.0` | Server host address |
+| `-p, --port` | `8080` | Server port |
+| `--timeout` | `30` | Default timeout in seconds |
+| `--token` | `""` | Authentication token (empty = no auth) |
 
 ## Usage
 
