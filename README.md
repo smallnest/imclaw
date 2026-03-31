@@ -104,23 +104,27 @@ make install-cli
 #### 单条消息
 
 ```bash
-# 发送单条消息后退出
+# 使用 -p/--prompt 参数（推荐）
+./bin/imclaw-cli -p "什么是 Go 语言？"
+./bin/imclaw-cli --prompt "什么是 Go 语言？"
+
+# 或直接传递消息
 ./bin/imclaw-cli "什么是 Go 语言？"
 
 # 指定 Agent
-./bin/imclaw-cli --agent codex "Hello"
+./bin/imclaw-cli --agent codex -p "Hello"
 
 # 使用指定 Session（可复用会话）
-./bin/imclaw-cli --session my-session "继续之前的对话"
+./bin/imclaw-cli --session my-session -p "继续之前的对话"
 
 # JSON 输出格式
-./bin/imclaw-cli --format json "Hello"
+./bin/imclaw-cli --format json -p "Hello"
 
 # 自动批准所有权限请求
-./bin/imclaw-cli --approve-all "Hello"
+./bin/imclaw-cli --approve-all -p "Hello"
 
 # 只读模式（拒绝所有写操作）
-./bin/imclaw-cli --deny-all "分析这段代码"
+./bin/imclaw-cli --deny-all -p "分析这段代码"
 ```
 
 ### CLI 参数
@@ -128,6 +132,8 @@ make install-cli
 | 参数 | 说明 |
 |------|------|
 | `--server <url>` | IMClaw 服务器 WebSocket URL（默认：ws://localhost:8080/ws） |
+| `--token <token>` | 认证令牌 |
+| `-p, --prompt <message>` | 提示消息（单次执行模式） |
 | `--session <id>` | 指定使用的 Session ID（为空则自动创建） |
 | `--agent <type>` | Agent 类型（claude, codex 等） |
 | `--cwd <dir>` | 工作目录 |

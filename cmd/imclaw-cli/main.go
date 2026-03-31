@@ -25,6 +25,9 @@ var (
 	// Session
 	sessionID = flag.String("session", "", "Session ID to use (empty for auto-create)")
 
+	// One-shot prompt
+	promptFlag = flag.StringP("prompt", "p", "", "Prompt message (one-shot mode)")
+
 	// Agent selection
 	agentType = flag.String("agent", "", "Agent type (claude, codex, etc.)")
 
@@ -79,20 +82,22 @@ var (
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "IMClaw CLI - Command line interface for IMClaw\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: %s [options] [message]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "If message is provided, sends it and exits.\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] [-p <message> | <message>]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "If message is provided (-p or positional), sends it and exits.\n")
 		fmt.Fprintf(os.Stderr, "If no message, starts interactive REPL mode.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  # Interactive mode\n")
 		fmt.Fprintf(os.Stderr, "  %s\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Send single message\n")
+		fmt.Fprintf(os.Stderr, "  # One-shot mode with -p\n")
+		fmt.Fprintf(os.Stderr, "  %s -p \"What is Go?\"\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # One-shot mode with positional argument\n")
 		fmt.Fprintf(os.Stderr, "  %s \"What is Go?\"\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Use codex agent\n")
-		fmt.Fprintf(os.Stderr, "  %s --agent codex \"Hello\"\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Use specific agent\n")
+		fmt.Fprintf(os.Stderr, "  %s --agent codex -p \"Hello\"\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # JSON output with auto-approve\n")
-		fmt.Fprintf(os.Stderr, "  %s --format json --approve-all \"Hello\"\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --format json --approve-all -p \"Hello\"\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -135,16 +140,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get message from remaining args
-	args := flag.Args()
+	// Get message from --prompt flag or remaining args
 	var message string
-	if len(args) > 0 {
-		message = strings.Join(args, " ")
+	if *promptFlag != "" {
+		message = *promptFlag
+	} else {
+		args := flag.Args()
+		if len(args) > 0 {
+			message = strings.Join(args, " ")
+		}
 	}
 
 	client := NewClient(*serverURL, *authToken)
 
-	// If message provided, send it and exit
+	// If message provided, send it and exit (one-shot mode)
 	if message != "" {
 		sendAndExit(client, message)
 		return
