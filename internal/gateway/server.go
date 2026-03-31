@@ -608,11 +608,7 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	var fullContent strings.Builder
 	var streamErr string
 	for chunk := range stream {
-		if chunk.Type == "content" {
-			fullContent.WriteString(chunk.Content)
-		} else if chunk.Type == "error" {
-			streamErr = chunk.Content
-		}
+		applyStreamChunk(&fullContent, &streamErr, chunk)
 
 		// Send streaming notification
 		notification := JSONRPCRequest{
@@ -654,6 +650,15 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 			"agent":      ag.Type(),
 		},
 	})
+}
+
+func applyStreamChunk(fullContent *strings.Builder, streamErr *string, chunk agent.StreamChunk) {
+	switch chunk.Type {
+	case "content":
+		fullContent.WriteString(chunk.Content)
+	case "error":
+		*streamErr = chunk.Content
+	}
 }
 
 // Helper functions to parse params
