@@ -202,6 +202,85 @@ ssh -L 8080:localhost:8080 user@remote-server -N &
 imclaw-cli --server ws://localhost:8080/ws -p "Hello"
 ```
 
+## 在 Clawdbot 中使用 acp-remote Skill
+
+如果你是 **Clawdbot（OpenClaw）** 用户，还可以通过 `acp-remote` Skill 更便捷地连接远程 IMClaw 服务，无需手动输入命令。
+
+### 什么是 acp-remote Skill？
+
+`acp-remote` 是一个专为 Clawdbot 设计的 Skill，它封装了 `imclaw-cli` 的调用，让你可以直接在 Clawdbot 对话中与远程 AI Agent 交互。
+
+### 安装 Skill
+
+确保已安装依赖：
+
+```bash
+# 安装 acpx
+npm install -g acpx@latest
+
+# 安装 imclaw-cli
+curl -fsSL https://raw.githubusercontent.com/smallnest/imclaw/main/scripts/install.sh | bash
+```
+
+### 配置环境变量
+
+在 `~/.bashrc` 或 `~/.zshrc` 中配置远程服务器：
+
+```bash
+export IMCLAW_SERVER="ws://your-server:8080/ws"
+export IMCLAW_TOKEN="your-secret-token"
+```
+
+### 使用示例
+
+在 Clawdbot 中，直接告诉 AI 使用 acp-remote：
+
+```
+请使用 acp-remote skill 连接远程服务器，帮我分析 /var/log/app.log 中的错误
+```
+
+AI 会自动：
+
+1. 检测并安装必要的依赖（imclaw-cli、acpx）
+2. 连接到配置的远程 IMClaw 服务器
+3. 执行你的请求并返回结果
+
+### Skill 参数
+
+acp-remote 支持所有 imclaw-cli 的参数：
+
+| 参数 | 说明 |
+|------|------|
+| `--server` | 远程服务器地址 |
+| `--token` | 认证 Token |
+| `--agent` | Agent 类型（claude、codex 等）|
+| `--cwd` | 工作目录 |
+| `--approve-all` | 自动批准所有操作 |
+| `--deny-all` | 只读模式 |
+| `--format` | 输出格式（text、json、quiet）|
+
+### 实际场景
+
+**场景一：远程日志分析**
+
+```
+用 acp-remote 分析远程服务器上的 nginx 错误日志，找出最常见的 5 种错误
+```
+
+**场景二：远程代码审查**
+
+```
+用 acp-remote 连接生产服务器，审查 /app/src 目录下的代码，找出潜在的性能问题
+```
+
+**场景三：远程调试**
+
+```
+用 acp-remote 帮我在远程服务器上调试这个内存泄漏问题，进程 PID 是 12345
+```
+
+这样，你就可以在 Clawdbot 的对话中无缝操作远程服务器，无需切换到终端，大大提升工作效率！
+
 ## 交互模式命令
 
 进入交互模式后，支持以下命令：
