@@ -129,18 +129,6 @@ dev:
 	@which air > /dev/null || go install github.com/cosmtrek/air@latest
 	air
 
-# 生成示例配置
-.PHONY: config
-config:
-	@echo "Creating default config..."
-	@mkdir -p ~/.imclaw
-	@if [ ! -f ~/.imclaw/config.json ]; then \
-		cp config.example.json ~/.imclaw/config.json; \
-		echo "Config created at ~/.imclaw/config.json"; \
-	else \
-		echo "Config already exists at ~/.imclaw/config.json"; \
-	fi
-
 # 显示帮助
 .PHONY: help
 help:
@@ -162,7 +150,6 @@ help:
 	@echo "  install        安装到 GOPATH/bin"
 	@echo "  install-cli    安装 CLI 到 GOPATH/bin"
 	@echo "  dev            开发模式（热重载）"
-	@echo "  config         生成默认配置文件"
 	@echo "  help           显示帮助信息"
 
 # 版本信息

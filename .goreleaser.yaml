@@ -54,7 +54,6 @@ archives:
     files:
       - README.md
       - LICENSE
-      - config.example.json
 
 checksum:
   name_template: 'checksums.txt'

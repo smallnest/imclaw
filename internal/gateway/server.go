@@ -14,9 +14,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/smallnest/imclaw/internal/agent"
-	"github.com/smallnest/imclaw/internal/config"
 	"github.com/smallnest/imclaw/internal/session"
 )
+
+// Config represents the server configuration
+type Config struct {
+	Host      string
+	Port      int
+	Timeout   int
+	AuthToken string
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -28,7 +35,7 @@ var upgrader = websocket.Upgrader{
 
 // Server represents the gateway server
 type Server struct {
-	config     *config.Config
+	config     *Config
 	sessionMgr *session.Manager
 	agentMgr   *agent.Manager
 
@@ -49,7 +56,7 @@ type WSConnection struct {
 }
 
 // NewServer creates a new gateway server
-func NewServer(cfg *config.Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
+func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
 	return &Server{
 		config:      cfg,
 		sessionMgr:  sessionMgr,
