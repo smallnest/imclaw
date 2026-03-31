@@ -606,7 +606,7 @@ func sendAndExit(client *Client, message string) {
 			if chunkType == "error" {
 				fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
 			} else if chunkType == "content" {
-				fmt.Println(chunk)
+				fmt.Print(chunk)
 			}
 			// "done" type chunks are handled implicitly
 		})
@@ -749,7 +749,7 @@ func startREPL(client *Client) {
 					if chunkType == "error" {
 						fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
 					} else if chunkType == "content" {
-						fmt.Println(chunk)
+						fmt.Print(chunk)
 					}
 				})
 			} else {
@@ -785,7 +785,7 @@ func startREPL(client *Client) {
 }
 
 func printHelp() {
-	fmt.Println(`
+	fmt.Print(`
 Commands:
   <message>       Send a message to the agent
   /new            Create a new session (clear context)

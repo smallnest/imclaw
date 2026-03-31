@@ -606,9 +606,13 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 
 	// Stream chunks to client
 	var fullContent strings.Builder
+	var streamErr string
 	for chunk := range stream {
-		fullContent.WriteString(chunk.Content)
-		fullContent.WriteString("\n")
+		if chunk.Type == "content" {
+			fullContent.WriteString(chunk.Content)
+		} else if chunk.Type == "error" {
+			streamErr = chunk.Content
+		}
 
 		// Send streaming notification
 		notification := JSONRPCRequest{
@@ -628,12 +632,24 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		}
 	}
 
+	if streamErr != "" {
+		_ = conn.SendJSON(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32603,
+				Message: fmt.Sprintf("Agent error: %s", streamErr),
+			},
+		})
+		return
+	}
+
 	// Send final response
 	_ = conn.SendJSON(JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result: map[string]interface{}{
-			"content":    strings.TrimSuffix(fullContent.String(), "\n"),
+			"content":    fullContent.String(),
 			"session_id": sess.ID,
 			"agent":      ag.Type(),
 		},
@@ -696,10 +712,10 @@ func (s *Server) handleSessionInit(connID string, req *JSONRPCRequest) *JSONRPCR
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result: map[string]interface{}{
-			"session_id":   sess.ID,
-			"agent":        sess.AgentName,
-			"created_at":   sess.CreatedAt,
-			"last_active":  sess.LastActive,
+			"session_id":  sess.ID,
+			"agent":       sess.AgentName,
+			"created_at":  sess.CreatedAt,
+			"last_active": sess.LastActive,
 		},
 	}
 }
