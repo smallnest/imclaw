@@ -145,7 +145,7 @@ make install-cli
 | `--format <fmt>` | 输出格式：text, json, quiet（默认：text） |
 | `--suppress-reads` | 禁止输出原始读取文件内容 |
 | `--model <id>` | Agent 模型 ID |
-| `--allowed-tools <list>` | 允许的工具名称列表（逗号分隔） |
+| `--allowed-tools <list>` | 允许的工具名称（逗号分隔）。不指定=允许所有，`""`=禁用所有 |
 | `--max-turns <count>` | 会话最大轮次 |
 | `--prompt-retries <count>` | 失败重试次数 |
 | `--json-strict` | 严格 JSON 模式（需要 --format json） |

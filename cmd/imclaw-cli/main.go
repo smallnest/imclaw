@@ -55,7 +55,7 @@ var (
 	model = flag.String("model", "", "Agent model id")
 
 	// Tools
-	allowedTools = flag.String("allowed-tools", "", "Allowed tool names as a comma-separated list (use \"\" for no tools)")
+	allowedTools = flag.String("allowed-tools", "", "Allowed tool names (comma-separated). Empty=allow all, \"\"=no tools")
 
 	// Session control
 	maxTurns      = flag.Int("max-turns", 0, "Maximum turns for the session")
