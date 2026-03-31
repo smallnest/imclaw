@@ -5,6 +5,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_VERSION ?= $(shell go version | awk '{print $$3}')
 
+# GOPATH
+GOPATH ?= $(shell go env GOPATH)
+
 # 构建参数
 BINARY_NAME := imclaw
 CLI_NAME := imclaw-cli
