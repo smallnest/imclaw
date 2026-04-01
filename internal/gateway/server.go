@@ -283,7 +283,7 @@ func (s *Server) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	agents := s.agentMgr.List()
+	agents := agent.SupportedAgents()
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"agents": agents,
 		"count":  len(agents),

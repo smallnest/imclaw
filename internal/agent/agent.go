@@ -173,7 +173,32 @@ func (m *Manager) Get(agentType string) (Agent, bool) {
 	return ag, ok
 }
 
-// List lists all agent types
+// Supported agent types (coding agents from acpx)
+var supportedAgents = []string{
+	"claude",
+	"codex",
+	"cursor",
+	"copilot",
+	"gemini",
+	"qwen",
+	"kimi",
+	"kiro",
+	"droid",
+	"iflow",
+	"kilocode",
+	"opencode",
+	"qoder",
+	"trae",
+	"pi",
+	"openclaw",
+}
+
+// SupportedAgents returns all supported agent types
+func SupportedAgents() []string {
+	return supportedAgents
+}
+
+// List lists all agent types (created agents)
 func (m *Manager) List() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
