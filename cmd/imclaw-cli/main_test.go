@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/smallnest/imclaw/internal/event"
+	"github.com/smallnest/imclaw/internal/agent"
 	flag "github.com/spf13/pflag"
 )
 
@@ -83,12 +83,13 @@ func TestWriteParsedMessageOutputsJSONLine(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	writeStructuredEvent(&stdout, &stderr, event.Event{
-		Type:    event.TypeThinking,
+	writeStructuredEvent(&stdout, &stderr, agent.Event{
+		Version: agent.EventProtocolVersion,
+		Type:    agent.TypeThinkingDelta,
 		Content: "hello",
 	})
 
-	if got := stdout.String(); got != "{\"type\":\"thinking\",\"content\":\"hello\"}\n" {
+	if got := stdout.String(); got != "{\"version\":\"v1\",\"type\":\"thinking_delta\",\"content\":\"hello\"}\n" {
 		t.Fatalf("unexpected parsed message output: %q", got)
 	}
 	if got := stderr.String(); got != "" {

@@ -57,8 +57,7 @@ type WSConnection struct {
 }
 
 // StreamEvent represents a structured event in the stream.
-// Deprecated: Use event.Event instead.
-type StreamEvent = event.Event
+type StreamEvent = agent.Event
 
 // NewServer creates a new gateway server
 func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
@@ -613,10 +612,14 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	var fullContent strings.Builder
 	var streamErr string
 	parser := event.NewParser()
+	sawNativeEvents := false
 	for chunk := range stream {
 		applyStreamChunk(&fullContent, &streamErr, chunk)
+		if len(chunk.Events) > 0 {
+			sawNativeEvents = true
+		}
 
-		for _, evt := range buildStructuredEvents(parser, chunk, false) {
+		for _, evt := range buildStructuredEvents(parser, chunk) {
 			if err := conn.SendJSON(newEventNotification(req.ID, evt)); err != nil {
 				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 				cancel()
@@ -642,11 +645,13 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		}
 	}
 
-	for _, evt := range buildStructuredEvents(parser, agent.StreamChunk{}, true) {
-		if err := conn.SendJSON(newEventNotification(req.ID, evt)); err != nil {
-			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
-			cancel()
-			return
+	if !sawNativeEvents {
+		for _, evt := range flushStructuredEvents(parser, streamErr == "") {
+			if err := conn.SendJSON(newEventNotification(req.ID, evt)); err != nil {
+				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+				cancel()
+				return
+			}
 		}
 	}
 
@@ -683,30 +688,64 @@ func applyStreamChunk(fullContent *strings.Builder, streamErr *string, chunk age
 	}
 }
 
-func buildStructuredEvents(parser *event.Parser, chunk agent.StreamChunk, flush bool) []event.Event {
-	var events []event.Event
+func buildStructuredEvents(parser *event.Parser, chunk agent.StreamChunk) []agent.Event {
+	if len(chunk.Events) > 0 {
+		return append([]agent.Event(nil), chunk.Events...)
+	}
 
+	var events []agent.Event
 	if chunk.Type == "content" {
-		events = append(events, parser.Feed(chunk.Content)...)
+		events = append(events, convertLegacyEvents(parser.Feed(chunk.Content))...)
 	}
-
 	if chunk.Type == "error" {
-		events = append(events, event.Event{
-			Type:    event.TypeError,
-			Content: chunk.Content,
-		})
+		events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeError, Content: chunk.Content})
 	}
-
-	if flush {
-		events = append(events, parser.Flush()...)
-	}
-
 	return events
 }
 
-func newEventNotification(id string, evt event.Event) JSONRPCRequest {
+func flushStructuredEvents(parser *event.Parser, includeDone bool) []agent.Event {
+	events := convertLegacyEvents(parser.Flush())
+	if includeDone {
+		events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeDone})
+	}
+	return events
+}
+
+func convertLegacyEvents(legacy []event.Event) []agent.Event {
+	var events []agent.Event
+	for _, evt := range legacy {
+		switch evt.Type {
+		case event.TypeThinking:
+			events = append(events,
+				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingStart},
+				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingDelta, Content: evt.Content},
+				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingEnd, Content: evt.Content},
+			)
+		case event.TypeToolStart:
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolStart, Name: evt.Name})
+		case event.TypeToolInput:
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolInput, Name: evt.Name, Input: evt.Input})
+		case event.TypeToolEnd:
+			if evt.Input != "" {
+				events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolInput, Name: evt.Name, Input: evt.Input})
+			}
+			if evt.Output != "" {
+				events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolOutput, Name: evt.Name, Output: evt.Output})
+			}
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolEnd, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+		case event.TypeToolError, event.TypeError:
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeError, Content: evt.Content, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+		case event.TypeOutput:
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeOutputFinal, Content: evt.Content})
+		}
+	}
+	return events
+}
+
+func newEventNotification(id string, evt agent.Event) JSONRPCRequest {
 	params := map[string]interface{}{
 		"id":      id,
+		"version": evt.Version,
 		"type":    string(evt.Type),
 		"content": evt.Content,
 	}

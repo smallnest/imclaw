@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/event"
 	flag "github.com/spf13/pflag"
 )
@@ -201,8 +202,8 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
-// StreamEvent is an alias for event.Event
-type StreamEvent = event.Event
+// StreamEvent is an alias for agent.Event
+type StreamEvent = agent.Event
 
 // Client is the IMClaw client
 type Client struct {
@@ -677,10 +678,13 @@ func notificationMatchesRequest(params map[string]interface{}, reqID string) boo
 }
 
 // parseEventParams parses event parameters from JSON-RPC notification params.
-func parseEventParams(params map[string]interface{}) event.Event {
-	evt := event.Event{}
+func parseEventParams(params map[string]interface{}) agent.Event {
+	evt := agent.Event{}
+	if v, ok := params["version"].(string); ok {
+		evt.Version = v
+	}
 	if t, ok := params["type"].(string); ok {
-		evt.Type = event.Type(t)
+		evt.Type = agent.EventType(t)
 	}
 	if c, ok := params["content"].(string); ok {
 		evt.Content = c
@@ -697,8 +701,8 @@ func parseEventParams(params map[string]interface{}) event.Event {
 	return evt
 }
 
-func writeStructuredEvent(stdout, stderr io.Writer, evt event.Event) {
-	if evt.Type == event.TypeError {
+func writeStructuredEvent(stdout, stderr io.Writer, evt agent.Event) {
+	if evt.Type == agent.TypeError {
 		fmt.Fprintf(stderr, "[error] %s\n", evt.Content)
 		return
 	}
