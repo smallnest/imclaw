@@ -359,7 +359,12 @@ async function sendPrompt() {
   try {
     els.sendPrompt.disabled = true;
     els.sendPrompt.textContent = 'Sending...';
-    await rpc('ask_stream', { session_id: state.selectedSessionId, agent: els.agentSelect.value, content });
+    await rpc('ask_stream', {
+      session_id: state.selectedSessionId,
+      agent: els.agentSelect.value,
+      content,
+      permissions: 'approve-all', // Auto-approve all permission requests
+    });
     els.promptInput.value = '';
     await loadSession(state.selectedSessionId);
   } catch (error) {
