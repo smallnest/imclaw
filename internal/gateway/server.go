@@ -463,6 +463,8 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		return
 	}
 
+	log.Printf("[gateway] handleAskStream: request_id=%s session_id=%s agent=%s content=%q", req.ID, getStringParam(params, "session_id"), agentType, truncate(content, 100))
+
 	sessionID := resolveSessionID(conn.ID, getStringParam(params, "session_id"))
 	opts := parsePromptOptions(params)
 	sess := s.prepareSession(sessionID, agentType)
@@ -501,7 +503,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 				sawErrorEvent = true
 			}
 			s.recordEvent(sess.ID, req.ID, evt)
-			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+			notification := newEventNotification(sess.ID, req.ID, evt)
+			log.Printf("[gateway] Sending event: type=%s name=%s content_len=%d", evt.Type, evt.Name, len(evt.Content))
+			if err := conn.SendJSON(notification); err != nil {
 				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 				cancel()
 				return
@@ -510,6 +514,7 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 
 		// Strip ANSI escape sequences from content before sending to WebSocket
 		cleanContent := event.StripANSI(chunk.Content)
+		log.Printf("[gateway] Sending stream chunk: type=%s content_len=%d", chunk.Type, len(cleanContent))
 		if err := conn.SendJSON(JSONRPCRequest{JSONRPC: "2.0", Method: "stream", Params: map[string]interface{}{"id": req.ID, "session_id": sess.ID, "type": chunk.Type, "content": cleanContent}}); err != nil {
 			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 			cancel()
@@ -523,7 +528,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 				sawErrorEvent = true
 			}
 			s.recordEvent(sess.ID, req.ID, evt)
-			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+			notification := newEventNotification(sess.ID, req.ID, evt)
+			log.Printf("[gateway] Sending flushed event: type=%s name=%s", evt.Type, evt.Name)
+			if err := conn.SendJSON(notification); err != nil {
 				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 				cancel()
 				return
@@ -532,6 +539,7 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	}
 
 	if streamErr != "" {
+		log.Printf("[gateway] Stream error: %s", streamErr)
 		if !sawErrorEvent {
 			s.recordError(sess.ID, req.ID, streamErr)
 		}
@@ -541,6 +549,7 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 
 	// Strip ANSI escape sequences and filter transcript markers from final content
 	finalContent := filterTranscriptMarkers(event.StripANSI(fullContent.String()))
+	log.Printf("[gateway] Sending final response: content_len=%d", len(finalContent))
 	s.recordResult(sess.ID, req.ID, finalContent)
 	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}})
 }
@@ -681,6 +690,13 @@ func filterTranscriptMarkers(content string) string {
 		filtered = append(filtered, line)
 	}
 	return strings.TrimSpace(strings.Join(filtered, "\n"))
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func buildStructuredEvents(parser *event.Parser, chunk agent.StreamChunk) []agent.Event {
