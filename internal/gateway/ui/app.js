@@ -321,6 +321,12 @@ function renderMessages() {
           if (toolBlock) bubble.appendChild(toolBlock);
           break;
 
+        case 'output_final':
+          // Final output content
+          const output = currentAssistantMessage.querySelector('.output-content');
+          if (output) output.textContent = filterStatusMessages(event.content) || '';
+          break;
+
         case 'error':
           bubble.appendChild(createErrorBlock(event.content || '未知错误'));
           break;
@@ -464,24 +470,6 @@ function connectWS() {
       }
       return;
     }
-
-    // Handle stream messages for content output
-    if (message.method === 'stream') {
-      const params = message.params || {};
-      if (params.type === 'content' && params.content) {
-        // Append content to output
-        if (!state.currentMessage || !els.messages.contains(state.currentMessage)) {
-          state.currentMessage = createMessageElement('assistant');
-          els.messages.appendChild(state.currentMessage);
-        }
-        const output = state.currentMessage.querySelector('.output-content');
-        if (output) {
-          output.textContent += filterStatusMessages(params.content) || '';
-          scrollToBottom();
-        }
-      }
-      return;
-    }
   });
 }
 
@@ -508,6 +496,12 @@ function handleStreamEvent(event) {
       // Only show completed tool calls
       const toolBlock = createToolBlock(event.name || 'tool', 'completed');
       if (toolBlock) bubble.appendChild(toolBlock);
+      break;
+
+    case 'output_final':
+      // Final output content
+      const output = state.currentMessage.querySelector('.output-content');
+      if (output) output.textContent = filterStatusMessages(event.content) || '';
       break;
 
     case 'error':
