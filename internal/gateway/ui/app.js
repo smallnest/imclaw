@@ -306,40 +306,19 @@ function renderMessages() {
       const event = entry.event;
 
       switch (event.type) {
-        case 'thinking_delta':
-          let thinkingBlock = bubble.querySelector('.thinking-block');
-          const filteredContent = filterStatusMessages(event.content);
-          if (!filteredContent) break;
-
-          if (!thinkingBlock) {
-            thinkingBlock = createThinkingBlock(filteredContent);
-            if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.firstChild);
-          } else {
-            const pre = thinkingBlock.querySelector('.collapsible-content pre') || thinkingBlock.querySelector('pre');
-            if (pre) pre.textContent += filteredContent;
-          }
-          break;
-
         case 'thinking_end':
-          // Thinking complete - no action needed, content already added via thinking_delta
-          break;
-
-        case 'tool_start':
-        case 'tool_input':
-        case 'tool_output':
-          // Skip these, only show completed tools
+          // Only show thinking when complete
+          const filteredContent = filterStatusMessages(event.content);
+          if (filteredContent) {
+            const thinkingBlock = createThinkingBlock(filteredContent);
+            if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.firstChild);
+          }
           break;
 
         case 'tool_end':
           // Only show completed tool calls
           const toolBlock = createToolBlock(event.name || 'tool', 'completed');
           if (toolBlock) bubble.appendChild(toolBlock);
-          break;
-
-        case 'output_delta':
-        case 'output_final':
-          const output = currentAssistantMessage.querySelector('.output-content');
-          if (output) output.textContent += filterStatusMessages(event.content) || '';
           break;
 
         case 'error':
@@ -485,6 +464,24 @@ function connectWS() {
       }
       return;
     }
+
+    // Handle stream messages for content output
+    if (message.method === 'stream') {
+      const params = message.params || {};
+      if (params.type === 'content' && params.content) {
+        // Append content to output
+        if (!state.currentMessage || !els.messages.contains(state.currentMessage)) {
+          state.currentMessage = createMessageElement('assistant');
+          els.messages.appendChild(state.currentMessage);
+        }
+        const output = state.currentMessage.querySelector('.output-content');
+        if (output) {
+          output.textContent += filterStatusMessages(params.content) || '';
+          scrollToBottom();
+        }
+      }
+      return;
+    }
   });
 }
 
@@ -498,43 +495,19 @@ function handleStreamEvent(event) {
   const bubble = state.currentMessage.querySelector('.bubble');
 
   switch (event.type) {
-    case 'thinking_delta':
-      let thinkingBlock = bubble.querySelector('.thinking-block');
-      const filteredContent = filterStatusMessages(event.content);
-      if (!filteredContent) break;
-
-      if (!thinkingBlock) {
-        thinkingBlock = createThinkingBlock(filteredContent);
-        if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.querySelector('.output-content') || bubble.firstChild);
-      } else {
-        const pre = thinkingBlock.querySelector('.collapsible-content pre') || thinkingBlock.querySelector('pre');
-        if (pre) pre.textContent += filteredContent;
-      }
-      break;
-
     case 'thinking_end':
-      // Thinking complete - no action needed, content already added via thinking_delta
-      break;
-
-    case 'tool_start':
-    case 'tool_input':
-    case 'tool_output':
-      // Skip these, only show completed tools
+      // Only show thinking when complete
+      const filteredContent = filterStatusMessages(event.content);
+      if (filteredContent) {
+        const thinkingBlock = createThinkingBlock(filteredContent);
+        if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.querySelector('.output-content') || bubble.firstChild);
+      }
       break;
 
     case 'tool_end':
       // Only show completed tool calls
       const toolBlock = createToolBlock(event.name || 'tool', 'completed');
       if (toolBlock) bubble.appendChild(toolBlock);
-      break;
-
-    case 'output_delta':
-      const output = state.currentMessage.querySelector('.output-content');
-      if (output) output.textContent += filterStatusMessages(event.content) || '';
-      break;
-
-    case 'output_final':
-      setOutputContent(filterStatusMessages(event.content) || '');
       break;
 
     case 'error':
