@@ -7,6 +7,8 @@ const state = {
   currentSession: null,
   pending: new Map(),
   isStreaming: false,
+  token: localStorage.getItem('imclaw_token') || '',
+  authRequired: false,
 };
 
 const els = {
@@ -20,12 +22,20 @@ const els = {
   promptInput: document.getElementById('prompt-input'),
   sendPrompt: document.getElementById('send-prompt'),
   newSession: document.getElementById('new-session'),
+  authModal: document.getElementById('auth-modal'),
+  authForm: document.getElementById('auth-form'),
+  tokenInput: document.getElementById('token-input'),
+  authError: document.getElementById('auth-error'),
 };
 
 // ============ Utility Functions ============
 
-async function fetchJSON(url) {
-  const res = await fetch(url);
+async function fetchJSON(url, options = {}) {
+  const headers = options.headers || {};
+  if (state.token) {
+    headers['Authorization'] = `Bearer ${state.token}`;
+  }
+  const res = await fetch(url, { ...options, headers });
   if (!res.ok) throw new Error(`Request failed: ${res.status}`);
   return res.json();
 }
@@ -452,7 +462,11 @@ function rpc(method, params = {}) {
 
 function connectWS() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  state.ws = new WebSocket(`${protocol}//${location.host}/ws`);
+  let wsUrl = `${protocol}//${location.host}/ws`;
+  if (state.token) {
+    wsUrl += `?token=${encodeURIComponent(state.token)}`;
+  }
+  state.ws = new WebSocket(wsUrl);
   setWSStatus(false);
 
   state.ws.addEventListener('open', () => {
@@ -535,6 +549,67 @@ function connectWS() {
       return;
     }
   });
+}
+
+// ============ Auth Functions ============
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/check');
+    const data = await res.json();
+    return data.required;
+  } catch (error) {
+    console.error('Failed to check auth:', error);
+    return false;
+  }
+}
+
+async function verifyToken(token) {
+  try {
+    const res = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    return data.valid;
+  } catch (error) {
+    console.error('Failed to verify token:', error);
+    return false;
+  }
+}
+
+function showAuthModal() {
+  els.authModal.style.display = 'flex';
+  els.tokenInput.value = '';
+  els.authError.textContent = '';
+  els.tokenInput.focus();
+}
+
+function hideAuthModal() {
+  els.authModal.style.display = 'none';
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const token = els.tokenInput.value.trim();
+  if (!token) {
+    els.authError.textContent = '请输入 Token';
+    return;
+  }
+
+  const valid = await verifyToken(token);
+  if (valid) {
+    state.token = token;
+    localStorage.setItem('imclaw_token', token);
+    hideAuthModal();
+    // Now bootstrap the app
+    await bootstrap();
+    connectWS();
+  } else {
+    els.authError.textContent = 'Token 无效，请重试';
+    els.tokenInput.select();
+  }
 }
 
 // ============ Bootstrap ============
@@ -672,7 +747,34 @@ els.promptInput.addEventListener('keydown', (event) => {
 
 // ============ Initialize ============
 
-connectWS();
-bootstrap().catch((error) => {
-  console.error('Bootstrap failed:', error);
+els.authForm.addEventListener('submit', handleAuthSubmit);
+
+async function init() {
+  // Check if authentication is required
+  const authRequired = await checkAuth();
+  state.authRequired = authRequired;
+
+  if (authRequired) {
+    // Check if we have a stored token
+    if (state.token) {
+      // Verify the stored token
+      const valid = await verifyToken(state.token);
+      if (valid) {
+        // Token is valid, proceed with bootstrap
+        await bootstrap();
+        connectWS();
+        return;
+      }
+    }
+    // Show auth modal
+    showAuthModal();
+  } else {
+    // No auth required, proceed normally
+    await bootstrap();
+    connectWS();
+  }
+}
+
+init().catch((error) => {
+  console.error('Init failed:', error);
 });
