@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,7 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/smallnest/imclaw/internal/transcript"
+	"github.com/smallnest/imclaw/internal/event"
 	flag "github.com/spf13/pflag"
 )
 
@@ -202,6 +201,9 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
+// StreamEvent is an alias for event.Event
+type StreamEvent = event.Event
+
 // Client is the IMClaw client
 type Client struct {
 	wsURL   string
@@ -368,8 +370,8 @@ func (c *Client) Ask(content string) (*JSONRPCResponse, error) {
 	return &resp, nil
 }
 
-// AskStream sends a message and streams the response
-func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)) (*JSONRPCResponse, error) {
+// AskStream sends a message and streams the response.
+func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string), onEvent func(StreamEvent)) (*JSONRPCResponse, error) {
 	if c.conn == nil {
 		if err := c.Connect(); err != nil {
 			return nil, err
@@ -476,16 +478,24 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 
 		// Try to parse as notification first
 		var notification JSONRPCRequest
-		if err := json.Unmarshal(msg, &notification); err == nil && notification.Method == "stream" {
-			// It's a streaming notification
+		if err := json.Unmarshal(msg, &notification); err == nil {
 			if params, ok := notification.Params.(map[string]interface{}); ok {
-				chunkType, _ := params["type"].(string)
-				chunkContent, _ := params["content"].(string)
-				if onChunk != nil {
-					onChunk(chunkType, chunkContent)
+				switch notification.Method {
+				case "stream":
+					chunkType, _ := params["type"].(string)
+					chunkContent, _ := params["content"].(string)
+					if onChunk != nil {
+						onChunk(chunkType, chunkContent)
+					}
+					continue
+				case "event":
+					evt := parseEventParams(params)
+					if onEvent != nil {
+						onEvent(evt)
+					}
+					continue
 				}
 			}
-			continue
 		}
 
 		// Try to parse as response
@@ -609,7 +619,8 @@ func looksLikeTranscript(content string) bool {
 
 func printResponseContent(content string) {
 	if *parseTranscript && looksLikeTranscript(content) {
-		printJSON(transcript.Parse(content))
+		events := event.Parse(content)
+		printJSON(events)
 		return
 	}
 	fmt.Println(content)
@@ -638,45 +649,48 @@ func handleParsedResult(result interface{}) bool {
 }
 
 // streamHandler returns a callback function for AskStream that handles
-// transcript parsing or direct output based on the parseTranscript flag.
-func streamHandler(transcriptChunks chan<- string) func(chunkType, chunk string) {
+// direct output based on the parseTranscript flag.
+func streamHandler() func(chunkType, chunk string) {
 	return func(chunkType, chunk string) {
-		if *parseTranscript {
-			if chunkType == "content" && transcriptChunks != nil {
-				transcriptChunks <- chunk
-			}
-		} else {
+		if !*parseTranscript {
 			writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
 		}
 	}
 }
 
-func writeParsedMessage(stdout io.Writer, msg transcript.Message) {
-	data, err := json.Marshal(msg)
+// parseEventParams parses event parameters from JSON-RPC notification params.
+func parseEventParams(params map[string]interface{}) event.Event {
+	evt := event.Event{}
+	if t, ok := params["type"].(string); ok {
+		evt.Type = event.Type(t)
+	}
+	if c, ok := params["content"].(string); ok {
+		evt.Content = c
+	}
+	if n, ok := params["name"].(string); ok {
+		evt.Name = n
+	}
+	if i, ok := params["input"].(string); ok {
+		evt.Input = i
+	}
+	if o, ok := params["output"].(string); ok {
+		evt.Output = o
+	}
+	return evt
+}
+
+func writeStructuredEvent(stdout, stderr io.Writer, evt event.Event) {
+	if evt.Type == event.TypeError {
+		fmt.Fprintf(stderr, "[error] %s\n", evt.Content)
+		return
+	}
+
+	data, err := json.Marshal(evt)
 	if err != nil {
-		fmt.Fprintf(stdout, "{\"type\":\"output\",\"content\":%q}\n", msg.Content)
+		fmt.Fprintf(stdout, "{\"type\":\"output\",\"content\":%q}\n", evt.Content)
 		return
 	}
 	fmt.Fprintln(stdout, string(data))
-}
-
-func startTranscriptStreamWriter(stdout io.Writer) (chan<- string, func()) {
-	chunks := make(chan string, 64)
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		for msg := range transcript.ParseStream(context.Background(), chunks) {
-			writeParsedMessage(stdout, msg)
-		}
-	}()
-
-	finish := func() {
-		close(chunks)
-		<-done
-	}
-
-	return chunks, finish
 }
 
 func printCLIError(stderr io.Writer, message string) {
@@ -708,15 +722,14 @@ func sendAndExit(client *Client, message string) {
 
 	var resp *JSONRPCResponse
 	var err error
+	var sawStructuredEvent bool
 
-	var transcriptChunks chan<- string
-	var finishTranscript func()
-	if *parseTranscript {
-		transcriptChunks, finishTranscript = startTranscriptStreamWriter(os.Stdout)
-		defer finishTranscript()
-	}
-
-	resp, err = client.AskStream(message, streamHandler(transcriptChunks))
+	resp, err = client.AskStream(message, streamHandler(), func(event StreamEvent) {
+		sawStructuredEvent = true
+		if *parseTranscript {
+			writeStructuredEvent(os.Stdout, os.Stderr, event)
+		}
+	})
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -730,7 +743,9 @@ func sendAndExit(client *Client, message string) {
 
 	// In normal mode, content is already printed via callback.
 	// For transcript parsing, only print the final content when it was not a transcript.
-	handleParsedResult(resp.Result)
+	if !sawStructuredEvent {
+		handleParsedResult(resp.Result)
+	}
 }
 
 // startREPL starts the interactive REPL
@@ -834,16 +849,14 @@ func startREPL(client *Client) {
 
 			// Send message
 			fmt.Println()
-			var transcriptChunks chan<- string
-			var finishTranscript func()
-			if *parseTranscript {
-				transcriptChunks, finishTranscript = startTranscriptStreamWriter(os.Stdout)
-			}
+			var sawStructuredEvent bool
 
-			resp, err := client.AskStream(line, streamHandler(transcriptChunks))
-			if finishTranscript != nil {
-				finishTranscript()
-			}
+			resp, err := client.AskStream(line, streamHandler(), func(event StreamEvent) {
+				sawStructuredEvent = true
+				if *parseTranscript {
+					writeStructuredEvent(os.Stdout, os.Stderr, event)
+				}
+			})
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -856,7 +869,9 @@ func startREPL(client *Client) {
 			}
 
 			fmt.Println()
-			handleParsedResult(resp.Result)
+			if !sawStructuredEvent {
+				handleParsedResult(resp.Result)
+			}
 			fmt.Println()
 		}
 	}

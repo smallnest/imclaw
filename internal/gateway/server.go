@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/smallnest/imclaw/internal/agent"
+	"github.com/smallnest/imclaw/internal/event"
 	"github.com/smallnest/imclaw/internal/session"
 )
 
@@ -54,6 +55,10 @@ type WSConnection struct {
 	ID string
 	mu sync.Mutex
 }
+
+// StreamEvent represents a structured event in the stream.
+// Deprecated: Use event.Event instead.
+type StreamEvent = event.Event
 
 // NewServer creates a new gateway server
 func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
@@ -607,10 +612,19 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	// Stream chunks to client
 	var fullContent strings.Builder
 	var streamErr string
+	parser := event.NewParser()
 	for chunk := range stream {
 		applyStreamChunk(&fullContent, &streamErr, chunk)
 
-		// Send streaming notification
+		for _, evt := range buildStructuredEvents(parser, chunk, false) {
+			if err := conn.SendJSON(newEventNotification(req.ID, evt)); err != nil {
+				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+				cancel()
+				return
+			}
+		}
+
+		// Send streaming notification (backward compatibility)
 		notification := JSONRPCRequest{
 			JSONRPC: "2.0",
 			Method:  "stream",
@@ -622,6 +636,14 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		}
 		if err := conn.SendJSON(notification); err != nil {
 			// WebSocket connection failed, cancel the context
+			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+			cancel()
+			return
+		}
+	}
+
+	for _, evt := range buildStructuredEvents(parser, agent.StreamChunk{}, true) {
+		if err := conn.SendJSON(newEventNotification(req.ID, evt)); err != nil {
 			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 			cancel()
 			return
@@ -658,6 +680,49 @@ func applyStreamChunk(fullContent *strings.Builder, streamErr *string, chunk age
 		fullContent.WriteString(chunk.Content)
 	case "error":
 		*streamErr = chunk.Content
+	}
+}
+
+func buildStructuredEvents(parser *event.Parser, chunk agent.StreamChunk, flush bool) []event.Event {
+	var events []event.Event
+
+	if chunk.Type == "content" {
+		events = append(events, parser.Feed(chunk.Content)...)
+	}
+
+	if chunk.Type == "error" {
+		events = append(events, event.Event{
+			Type:    event.TypeError,
+			Content: chunk.Content,
+		})
+	}
+
+	if flush {
+		events = append(events, parser.Flush()...)
+	}
+
+	return events
+}
+
+func newEventNotification(id string, evt event.Event) JSONRPCRequest {
+	params := map[string]interface{}{
+		"id":      id,
+		"type":    string(evt.Type),
+		"content": evt.Content,
+	}
+	if evt.Name != "" {
+		params["name"] = evt.Name
+	}
+	if evt.Input != "" {
+		params["input"] = evt.Input
+	}
+	if evt.Output != "" {
+		params["output"] = evt.Output
+	}
+	return JSONRPCRequest{
+		JSONRPC: "2.0",
+		Method:  "event",
+		Params:  params,
 	}
 }
 

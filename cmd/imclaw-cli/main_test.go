@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/smallnest/imclaw/internal/transcript"
+	"github.com/smallnest/imclaw/internal/event"
 	flag "github.com/spf13/pflag"
 )
 
@@ -80,14 +80,18 @@ func TestPrintCLIErrorIncludesHint(t *testing.T) {
 
 func TestWriteParsedMessageOutputsJSONLine(t *testing.T) {
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 
-	writeParsedMessage(&stdout, transcript.Message{
-		Type:    transcript.MessageThinking,
+	writeStructuredEvent(&stdout, &stderr, event.Event{
+		Type:    event.TypeThinking,
 		Content: "hello",
 	})
 
 	if got := stdout.String(); got != "{\"type\":\"thinking\",\"content\":\"hello\"}\n" {
 		t.Fatalf("unexpected parsed message output: %q", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("expected no stderr output, got %q", got)
 	}
 }
 
