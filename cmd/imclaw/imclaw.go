@@ -7,10 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	flag "github.com/spf13/pflag"
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/gateway"
 	"github.com/smallnest/imclaw/internal/session"
+	flag "github.com/spf13/pflag"
 )
 
 var (
@@ -18,6 +18,7 @@ var (
 	port      = flag.IntP("port", "p", 8080, "Server port")
 	timeout   = flag.Int("timeout", 30, "Default timeout in seconds")
 	authToken = flag.String("token", "", "Authentication token (empty for no auth)")
+	devUI     = flag.Bool("dev-ui", false, "Serve UI assets from local files instead of embedded assets")
 
 	showVersion = flag.Bool("version", false, "Show version information")
 
@@ -66,6 +67,7 @@ func main() {
 		Port:      *port,
 		Timeout:   *timeout,
 		AuthToken: *authToken,
+		DevMode:   *devUI,
 	}
 	srv := gateway.NewServer(cfg, sessionMgr, agentMgr)
 	if err := srv.Start(ctx); err != nil {
@@ -76,6 +78,9 @@ func main() {
 	fmt.Printf("Gateway started on %s:%d\n", cfg.Host, cfg.Port)
 	fmt.Printf("  HTTP:      http://%s:%d\n", cfg.Host, cfg.Port)
 	fmt.Printf("  WebSocket: ws://%s:%d/ws\n", cfg.Host, cfg.Port)
+	if cfg.DevMode {
+		fmt.Println("  UI Mode:   development (filesystem assets, no cache)")
+	}
 	fmt.Printf("\nUse 'imclaw-cli' to interact with the server.\n\n")
 
 	// Wait for context cancellation

@@ -915,6 +915,9 @@ func (p *ProtocolParser) flushOutput() []Event {
 		return nil
 	}
 
+	// Filter out any remaining transcript markers
+	content = filterOutputMarkers(content)
+
 	return []Event{{Version: EventProtocolVersion, Type: TypeOutputFinal, Content: content}}
 }
 
@@ -999,6 +1002,26 @@ func trimProtocolBlankLines(s string) string {
 	}
 
 	return strings.Join(lines[start:end], "\n")
+}
+
+// filterOutputMarkers removes transcript marker lines from output content.
+func filterOutputMarkers(content string) string {
+	lines := strings.Split(content, "\n")
+	var filtered []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip marker lines
+		if trimmed == "[thinking]" ||
+			strings.HasPrefix(trimmed, "[thinking] ") ||
+			strings.HasPrefix(trimmed, "[tool]") ||
+			strings.HasPrefix(trimmed, "[done]") ||
+			strings.HasPrefix(trimmed, "[acpx]") ||
+			strings.HasPrefix(trimmed, "[client]") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
 }
 
 func startsWithProtocolWhitespace(s string) bool {

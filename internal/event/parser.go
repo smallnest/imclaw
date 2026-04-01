@@ -300,7 +300,8 @@ func normalizeChunk(raw string) string {
 	return raw
 }
 
-func stripANSI(s string) string {
+// StripANSI removes ANSI escape sequences from a string.
+func StripANSI(s string) string {
 	if strings.IndexByte(s, '\x1b') < 0 {
 		return s
 	}
@@ -327,6 +328,10 @@ func stripANSI(s string) string {
 	}
 
 	return result.String()
+}
+
+func stripANSI(s string) string {
+	return StripANSI(s)
 }
 
 func trimBlankLines(s string) string {

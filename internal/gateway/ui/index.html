@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IMClaw 对话</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐝</text></svg>">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="https://cdn.jsdmirror.com/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <!-- Left Sidebar: Session List -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">IMClaw <span class="bee-logo">🐝</span></h1>
+        <button id="new-session" class="new-chat-btn" title="新建对话">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="sidebar-search">
+        <input id="session-filter" type="search" placeholder="搜索对话...">
+      </div>
+      <div id="session-list" class="session-list"></div>
+      <div class="sidebar-footer">
+        <select id="agent-select" class="agent-select"></select>
+      </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+      <!-- Chat Header -->
+      <header class="chat-header">
+        <div class="chat-title">
+          <h2 id="session-title">新对话</h2>
+          <span id="session-meta" class="session-meta"></span>
+        </div>
+        <div class="chat-actions">
+          <span id="ws-status" class="status-indicator offline">离线</span>
+        </div>
+      </header>
+
+      <!-- Messages Container -->
+      <div id="messages" class="messages">
+        <div class="welcome-screen">
+          <div class="welcome-icon bee-logo">🐝</div>
+          <h2>欢迎使用 IMClaw</h2>
+          <p>选择一个对话或开始新对话</p>
+        </div>
+      </div>
+
+      <!-- Input Area -->
+      <div class="input-area">
+        <div class="input-container">
+          <textarea
+            id="prompt-input"
+            rows="1"
+            placeholder="输入消息..."
+            autocomplete="off"
+          ></textarea>
+          <button id="send-prompt" class="send-btn" title="发送消息">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+        <p class="input-hint">按 Enter 发送，Shift+Enter 换行</p>
+      </div>
+    </main>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
