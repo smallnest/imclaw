@@ -336,28 +336,57 @@ els.agentSelect.addEventListener('change', async () => {
 });
 
 async function sendPrompt() {
-  if (!state.selectedSessionId) return;
+  // Check if session is selected
+  if (!state.selectedSessionId) {
+    appendError('Please select or create a session first');
+    return;
+  }
+
+  // Check input content
   const content = els.promptInput.value.trim();
-  if (!content) return;
+  if (!content) {
+    appendError('Please enter a prompt');
+    return;
+  }
+
+  // Check WebSocket connection
+  if (!state.wsReady) {
+    appendError('WebSocket is not connected. Please wait...');
+    return;
+  }
+
   resetLivePanels();
   try {
+    els.sendPrompt.disabled = true;
+    els.sendPrompt.textContent = 'Sending...';
     await rpc('ask_stream', { session_id: state.selectedSessionId, agent: els.agentSelect.value, content });
     els.promptInput.value = '';
     await loadSession(state.selectedSessionId);
   } catch (error) {
     appendError(error.message);
+  } finally {
+    els.sendPrompt.disabled = false;
+    els.sendPrompt.textContent = 'Send';
   }
 }
 
-els.sendPrompt.addEventListener('click', sendPrompt);
+els.sendPrompt.addEventListener('click', () => {
+  console.log('Send button clicked, selectedSessionId:', state.selectedSessionId, 'wsReady:', state.wsReady);
+  void sendPrompt();
+});
 els.promptInput.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault();
+    console.log('Cmd/Ctrl+Enter pressed');
     void sendPrompt();
   }
 });
 
+// Debug: log when elements are found
+console.log('UI initialized, sendPrompt element:', els.sendPrompt ? 'found' : 'NOT FOUND');
+
 connectWS();
 bootstrap().catch((error) => {
+  console.error('Bootstrap failed:', error);
   els.sessionMeta.textContent = error.message;
 });
