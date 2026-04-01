@@ -117,8 +117,23 @@ func (h *uiHandler) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Inject build information into HTML (optional enhancement)
+	// Inject build information and cache-busting version
 	html := string(data)
+
+	// Add version query parameter to static assets for cache busting
+	version := BuildVersion
+	if version == "dev" || version == "unknown" {
+		version = BuildCommit
+	}
+	if version == "unknown" {
+		version = time.Now().Format("20060102150405") // Fallback to timestamp
+	}
+
+	// Replace asset URLs with versioned URLs
+	html = strings.Replace(html, `href="/assets/styles.css"`, fmt.Sprintf(`href="/assets/styles.css?v=%s"`, version), 1)
+	html = strings.Replace(html, `src="/assets/app.js"`, fmt.Sprintf(`src="/assets/app.js?v=%s"`, version), 1)
+
+	// Inject build information into HTML head
 	html = strings.Replace(html, "<head>", fmt.Sprintf(`<head>
 <meta name="app-version" content="%s">
 <meta name="build-time" content="%s">
