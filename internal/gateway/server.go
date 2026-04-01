@@ -105,6 +105,8 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) startServer(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
+	mux.HandleFunc("/api/auth/verify", s.handleAuthVerify)
 	mux.HandleFunc("/api/sessions", s.handleSessionsAPI)
 	mux.HandleFunc("/api/sessions/", s.handleSessionDetailAPI)
 	mux.HandleFunc("/api/agents", s.handleAgentsAPI)
@@ -165,6 +167,51 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
 		"time":   time.Now().Unix(),
+	})
+}
+
+// handleAuthCheck returns whether authentication is required
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"required": s.config.AuthToken != "",
+	})
+}
+
+// handleAuthVerify verifies the provided token
+func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid": false,
+			"error": "invalid request",
+		})
+		return
+	}
+
+	// If no token is configured, always return valid
+	if s.config.AuthToken == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid": true,
+		})
+		return
+	}
+
+	// Verify the token
+	valid := subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.config.AuthToken)) == 1
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid": valid,
 	})
 }
 

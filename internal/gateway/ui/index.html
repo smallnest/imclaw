@@ -9,6 +9,22 @@
   <script src="https://cdn.jsdmirror.com/npm/marked/marked.min.js"></script>
 </head>
 <body>
+  <!-- Auth Modal -->
+  <div id="auth-modal" class="auth-modal">
+    <div class="auth-dialog">
+      <div class="auth-header">
+        <span class="auth-icon bee-logo">🐝</span>
+        <h2>IMClaw 认证</h2>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <p class="auth-hint">请输入访问 Token</p>
+        <input id="token-input" type="password" class="auth-input" placeholder="Token" autocomplete="off" autofocus>
+        <div id="auth-error" class="auth-error"></div>
+        <button type="submit" class="auth-submit">验证</button>
+      </form>
+    </div>
+  </div>
+
   <div class="app">
     <!-- Left Sidebar: Session List -->
     <aside class="sidebar">
