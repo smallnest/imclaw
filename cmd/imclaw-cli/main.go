@@ -589,6 +589,14 @@ func (c *Client) HTTPGet(path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+func writeStreamChunk(stdout, stderr io.Writer, chunkType, chunk string) {
+	if chunkType == "error" {
+		fmt.Fprintf(stderr, "[error] %s\n", chunk)
+	} else if chunkType == "content" {
+		fmt.Fprint(stdout, chunk)
+	}
+}
+
 // sendAndExit sends a single message and exits
 func sendAndExit(client *Client, message string) {
 	if err := client.Connect(); err != nil {
@@ -603,11 +611,7 @@ func sendAndExit(client *Client, message string) {
 	if *stream {
 		// Use streaming mode
 		resp, err = client.AskStream(message, func(chunkType, chunk string) {
-			if chunkType == "error" {
-				fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
-			} else if chunkType == "content" {
-				fmt.Println(chunk)
-			}
+			writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
 			// "done" type chunks are handled implicitly
 		})
 	} else {
@@ -746,11 +750,7 @@ func startREPL(client *Client) {
 			if *stream {
 				fmt.Println()
 				resp, err = client.AskStream(line, func(chunkType, chunk string) {
-					if chunkType == "error" {
-						fmt.Fprintf(os.Stderr, "[error] %s\n", chunk)
-					} else if chunkType == "content" {
-						fmt.Println(chunk)
-					}
+					writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
 				})
 			} else {
 				resp, err = client.Ask(line)
@@ -785,7 +785,7 @@ func startREPL(client *Client) {
 }
 
 func printHelp() {
-	fmt.Println(`
+	fmt.Print(`
 Commands:
   <message>       Send a message to the agent
   /new            Create a new session (clear context)

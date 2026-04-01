@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 // StreamChunk represents a chunk of streaming output
@@ -548,23 +550,11 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 
 	cmd := exec.CommandContext(ctx, a.command, args...)
 
-	// Get stdout and stderr pipes
-	stdout, err := cmd.StdoutPipe()
+	// acpx only emits true incremental output when attached to a PTY.
+	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to start command: %w", err)
+		return nil, fmt.Errorf("failed to start PTY command: %w", err)
 	}
 
 	// Create output channel with larger buffer
@@ -574,6 +564,7 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 	go func() {
 		defer close(outputCh)
 		defer cancel()
+		defer ptmx.Close()
 
 		// Ensure process is killed on exit
 		defer func() {
@@ -582,86 +573,44 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 			}
 		}()
 
-		// Read stderr in background
-		stderrDone := make(chan struct{})
-		go func() {
-			defer close(stderrDone)
-			stderrReader := bufio.NewReader(stderr)
-			for {
-				line, err := stderrReader.ReadString('\n')
-				if err != nil {
-					if err != io.EOF {
-						log.Printf("[acpx] stderr error: %v", err)
-					}
-					return
-				}
-				line = strings.TrimSuffix(line, "\n")
-				if line != "" {
-					log.Printf("[acpx] stderr: %s", line)
-				}
-			}
-		}()
-
-		// Read stdout and send chunks
-		reader := bufio.NewReader(stdout)
+		// Read stdout in raw chunks so output can stream even without newlines.
+		reader := bufio.NewReader(ptmx)
 		var accumulatedContent strings.Builder
+		buf := make([]byte, 1024)
 
 		for {
-			line, err := reader.ReadString('\n')
+			n, err := reader.Read(buf)
+			if n > 0 {
+				chunk := string(buf[:n])
+				accumulatedContent.WriteString(chunk)
+
+				select {
+				case outputCh <- StreamChunk{Type: "content", Content: chunk}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("[acpx] stdout error: %v", err)
 				}
 				break
 			}
-
-			line = strings.TrimSuffix(line, "\n")
-
-			// Skip empty lines and status lines
-			if line == "" || strings.HasPrefix(line, "[acpx]") {
-				log.Printf("[acpx] status: %s", line)
-				continue
-			}
-
-			// Send content chunk
-			accumulatedContent.WriteString(line)
-			accumulatedContent.WriteString("\n")
-
-			select {
-			case outputCh <- StreamChunk{Type: "content", Content: line}:
-				// Successfully sent
-			case <-ctx.Done():
-				// Context cancelled, stop sending
-				return
-			}
 		}
 
 		// Wait for command to complete
 		waitErr := cmd.Wait()
 
-		// Wait for stderr to finish (with timeout protection via context)
-		select {
-		case <-stderrDone:
-		case <-ctx.Done():
-		}
-
 		// Send done or error (with context check to avoid deadlock)
 		if waitErr != nil {
-			// Check if we have accumulated content despite error
-			if accumulatedContent.Len() > 0 {
-				select {
-				case outputCh <- StreamChunk{Type: "done", Content: accumulatedContent.String()}:
-				case <-ctx.Done():
-				}
-			} else {
-				select {
-				case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error()}:
-				case <-ctx.Done():
-				}
+			select {
+			case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error()}:
+			case <-ctx.Done():
 			}
 		} else {
 			select {
-			case outputCh <- StreamChunk{Type: "done", Content: accumulatedContent.String()}:
+			case outputCh <- StreamChunk{Type: "done"}:
 			case <-ctx.Done():
 			}
 		}
