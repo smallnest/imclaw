@@ -38,71 +38,60 @@ func TestApplyStreamChunkCapturesErrorSeparately(t *testing.T) {
 	}
 }
 
-func TestBuildStructuredEventsFromTranscriptChunks(t *testing.T) {
+func TestBuildStructuredEventsPrefersNativeAgentEvents(t *testing.T) {
 	parser := event.NewParser()
-
-	events := buildStructuredEvents(parser, agent.StreamChunk{Type: "content", Content: "[thinking] hello\nworld\n"}, false)
-	if len(events) != 1 {
-		t.Fatalf("expected one structured event, got %#v", events)
-	}
-	if events[0].Type != event.TypeThinking || events[0].Content != "hello" {
-		t.Fatalf("unexpected thinking event: %#v", events[0])
+	chunk := agent.StreamChunk{
+		Type:    "content",
+		Content: "ignored transcript",
+		Events:  []agent.Event{{Version: agent.EventProtocolVersion, Type: agent.TypeOutputDelta, Content: "hello"}},
 	}
 
-	events = buildStructuredEvents(parser, agent.StreamChunk{}, true)
+	events := buildStructuredEvents(parser, chunk)
 	if len(events) != 1 {
-		t.Fatalf("expected one flushed event, got %#v", events)
+		t.Fatalf("expected one native event, got %#v", events)
 	}
-	if events[0].Type != event.TypeOutput || events[0].Content != "world" {
-		t.Fatalf("unexpected flushed output event: %#v", events[0])
+	if events[0].Type != agent.TypeOutputDelta || events[0].Content != "hello" {
+		t.Fatalf("unexpected native event: %#v", events[0])
 	}
 }
 
-func TestBuildStructuredEventsIncludesErrors(t *testing.T) {
+func TestBuildStructuredEventsFallsBackToTranscriptParser(t *testing.T) {
 	parser := event.NewParser()
 
-	events := buildStructuredEvents(parser, agent.StreamChunk{Type: "error", Content: "exit status 5"}, false)
+	events := buildStructuredEvents(parser, agent.StreamChunk{Type: "content", Content: "[thinking] hello\nworld\n"})
+	if len(events) != 3 {
+		t.Fatalf("expected three fallback events, got %#v", events)
+	}
+	if events[0].Type != agent.TypeThinkingStart {
+		t.Fatalf("expected thinking_start, got %#v", events[0])
+	}
+	if events[1].Type != agent.TypeThinkingDelta || events[1].Content != "hello" {
+		t.Fatalf("unexpected thinking_delta event: %#v", events[1])
+	}
+	if events[2].Type != agent.TypeThinkingEnd || events[2].Content != "hello" {
+		t.Fatalf("unexpected thinking_end event: %#v", events[2])
+	}
+
+	flushed := flushStructuredEvents(parser, true)
+	if len(flushed) != 2 {
+		t.Fatalf("expected output_final and done, got %#v", flushed)
+	}
+	if flushed[0].Type != agent.TypeOutputFinal || flushed[0].Content != "world" {
+		t.Fatalf("unexpected flushed output event: %#v", flushed[0])
+	}
+	if flushed[1].Type != agent.TypeDone {
+		t.Fatalf("expected done event, got %#v", flushed[1])
+	}
+}
+
+func TestBuildStructuredEventsIncludesFallbackErrors(t *testing.T) {
+	parser := event.NewParser()
+
+	events := buildStructuredEvents(parser, agent.StreamChunk{Type: "error", Content: "exit status 5"})
 	if len(events) != 1 {
 		t.Fatalf("expected one error event, got %#v", events)
 	}
-	if events[0].Type != event.TypeError || events[0].Content != "exit status 5" {
+	if events[0].Type != agent.TypeError || events[0].Content != "exit status 5" {
 		t.Fatalf("unexpected error event: %#v", events[0])
-	}
-}
-
-func TestBuildStructuredEventsParsesToolLifecycle(t *testing.T) {
-	parser := event.NewParser()
-
-	// Tool start
-	events := buildStructuredEvents(parser, agent.StreamChunk{Type: "content", Content: "[tool] Read (pending)\n"}, false)
-	if len(events) != 1 || events[0].Type != event.TypeToolStart {
-		t.Fatalf("expected tool_start event, got %#v", events)
-	}
-	if events[0].Name != "Read" {
-		t.Fatalf("expected tool name 'Read', got %q", events[0].Name)
-	}
-
-	// Tool input
-	events = buildStructuredEvents(parser, agent.StreamChunk{Type: "content", Content: "  input: {\"path\": \"/tmp\"}\n"}, false)
-	if len(events) != 0 {
-		t.Fatalf("expected no events for tool input, got %#v", events)
-	}
-
-	// Tool end
-	events = buildStructuredEvents(parser, agent.StreamChunk{Type: "content", Content: "[tool] Read (completed)\n  output: hello\n"}, false)
-	// After completion, we collect output, then flush
-	events = append(events, buildStructuredEvents(parser, agent.StreamChunk{}, true)...)
-
-	var foundToolEnd bool
-	for _, e := range events {
-		if e.Type == event.TypeToolEnd {
-			foundToolEnd = true
-			if e.Name != "Read" {
-				t.Errorf("expected tool name 'Read', got %q", e.Name)
-			}
-		}
-	}
-	if !foundToolEnd {
-		t.Errorf("expected tool_end event, got %#v", events)
 	}
 }

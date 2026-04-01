@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,14 +12,47 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 )
 
-// StreamChunk represents a chunk of streaming output
+// StreamChunk represents a chunk of streaming output.
 type StreamChunk struct {
-	Type    string `json:"type"`    // "content", "error", "done"
-	Content string `json:"content"` // The content of the chunk
+	Type    string  `json:"type"`             // "content", "error", "done"
+	Content string  `json:"content"`          // The content of the chunk
+	Events  []Event `json:"events,omitempty"` // Native agent events for this chunk
+}
+
+// EventProtocolVersion identifies the agent event schema version.
+const EventProtocolVersion = "v1"
+
+// EventType identifies the type of an agent-native stream event.
+type EventType string
+
+const (
+	TypeThinkingStart EventType = "thinking_start"
+	TypeThinkingDelta EventType = "thinking_delta"
+	TypeThinkingEnd   EventType = "thinking_end"
+	TypeToolStart     EventType = "tool_start"
+	TypeToolInput     EventType = "tool_input"
+	TypeToolOutput    EventType = "tool_output"
+	TypeToolEnd       EventType = "tool_end"
+	TypeOutputDelta   EventType = "output_delta"
+	TypeOutputFinal   EventType = "output_final"
+	TypeError         EventType = "error"
+	TypeDone          EventType = "done"
+)
+
+// Event is the source-of-truth agent event forwarded to gateway clients.
+type Event struct {
+	Version string    `json:"version"`
+	Type    EventType `json:"type"`
+	Content string    `json:"content,omitempty"`
+	Name    string    `json:"name,omitempty"`
+	Input   string    `json:"input,omitempty"`
+	Output  string    `json:"output,omitempty"`
 }
 
 // Agent represents an AI agent
@@ -576,6 +610,7 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 		// Read stdout in raw chunks so output can stream even without newlines.
 		reader := bufio.NewReader(ptmx)
 		var accumulatedContent strings.Builder
+		parser := NewProtocolParser()
 		buf := make([]byte, 1024)
 
 		for {
@@ -583,9 +618,10 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 			if n > 0 {
 				chunk := string(buf[:n])
 				accumulatedContent.WriteString(chunk)
+				events := parser.Feed(chunk)
 
 				select {
-				case outputCh <- StreamChunk{Type: "content", Content: chunk}:
+				case outputCh <- StreamChunk{Type: "content", Content: chunk, Events: events}:
 				case <-ctx.Done():
 					return
 				}
@@ -601,16 +637,19 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 
 		// Wait for command to complete
 		waitErr := cmd.Wait()
+		flushEvents := parser.Flush()
 
 		// Send done or error (with context check to avoid deadlock)
 		if waitErr != nil {
+			events := append(flushEvents, Event{Version: EventProtocolVersion, Type: TypeError, Content: waitErr.Error()})
 			select {
-			case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error()}:
+			case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error(), Events: events}:
 			case <-ctx.Done():
 			}
 		} else {
+			events := append(flushEvents, Event{Version: EventProtocolVersion, Type: TypeDone})
 			select {
-			case outputCh <- StreamChunk{Type: "done"}:
+			case outputCh <- StreamChunk{Type: "done", Events: events}:
 			case <-ctx.Done():
 			}
 		}
@@ -619,6 +658,355 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 	}()
 
 	return outputCh, nil
+}
+
+func newEvent(typ EventType) Event {
+	return Event{Version: EventProtocolVersion, Type: typ}
+}
+
+type protocolState string
+
+const (
+	stateIdle       protocolState = ""
+	stateThinking   protocolState = "thinking"
+	stateToolInput  protocolState = "tool_input"
+	stateToolOutput protocolState = "tool_output"
+	stateOutput     protocolState = "output"
+)
+
+// ProtocolParser converts transcript text into agent-native events.
+type ProtocolParser struct {
+	buf bytes.Buffer
+
+	state protocolState
+
+	thinkingBuf bytes.Buffer
+	outputBuf   bytes.Buffer
+
+	toolName   string
+	toolInput  bytes.Buffer
+	toolOutput bytes.Buffer
+}
+
+// NewProtocolParser creates a parser for agent-native events.
+func NewProtocolParser() *ProtocolParser {
+	return &ProtocolParser{}
+}
+
+// Feed consumes a stream chunk and emits any completed events.
+func (p *ProtocolParser) Feed(chunk string) []Event {
+	chunk = normalizeProtocolChunk(chunk)
+	if chunk == "" {
+		return nil
+	}
+
+	p.buf.WriteString(chunk)
+
+	var events []Event
+	for {
+		line, found := p.readLine()
+		if !found {
+			break
+		}
+		events = append(events, p.processLine(line)...)
+	}
+
+	return events
+}
+
+// Flush emits buffered state as final events.
+func (p *ProtocolParser) Flush() []Event {
+	var events []Event
+
+	if p.buf.Len() > 0 {
+		events = append(events, p.processLine(p.buf.String())...)
+		p.buf.Reset()
+	}
+
+	switch p.state {
+	case stateThinking:
+		events = append(events, p.flushThinking()...)
+	case stateToolInput, stateToolOutput:
+		events = append(events, p.flushTool()...)
+	case stateOutput:
+		events = append(events, p.flushOutput()...)
+	}
+
+	p.state = stateIdle
+	return events
+}
+
+func (p *ProtocolParser) readLine() (string, bool) {
+	data := p.buf.Bytes()
+	idx := bytes.IndexByte(data, '\n')
+	if idx < 0 {
+		return "", false
+	}
+	line := string(data[:idx])
+	p.buf.Next(idx + 1)
+	return line, true
+}
+
+func (p *ProtocolParser) processLine(line string) []Event {
+	var events []Event
+
+	if markerType, content, isMarker := parseProtocolMarker(line); isMarker {
+		switch markerType {
+		case "thinking":
+			events = append(events, p.endActiveBlock()...)
+			events = append(events, newEvent(TypeThinkingStart))
+			p.state = stateThinking
+			if content != "" {
+				p.appendLine(&p.thinkingBuf, content)
+				events = append(events, Event{Version: EventProtocolVersion, Type: TypeThinkingDelta, Content: content})
+			}
+		case "tool":
+			events = append(events, p.processToolMarker(content)...)
+		case "done":
+			events = append(events, p.endActiveBlock()...)
+		default:
+			events = append(events, p.endActiveBlock()...)
+		}
+		return events
+	}
+
+	switch p.state {
+	case stateThinking:
+		if line == "" || startsWithProtocolWhitespace(line) {
+			p.appendLine(&p.thinkingBuf, line)
+			events = append(events, Event{Version: EventProtocolVersion, Type: TypeThinkingDelta, Content: line})
+			return events
+		}
+		events = append(events, p.flushThinking()...)
+		p.state = stateOutput
+		p.appendLine(&p.outputBuf, line)
+		events = append(events, Event{Version: EventProtocolVersion, Type: TypeOutputDelta, Content: line})
+	case stateToolInput:
+		if line == "" || startsWithProtocolWhitespace(line) {
+			p.appendLine(&p.toolInput, line)
+			events = append(events, Event{Version: EventProtocolVersion, Type: TypeToolInput, Name: p.toolName, Input: line})
+			return events
+		}
+		events = append(events, p.flushTool()...)
+		p.state = stateOutput
+		p.appendLine(&p.outputBuf, line)
+		events = append(events, Event{Version: EventProtocolVersion, Type: TypeOutputDelta, Content: line})
+	case stateToolOutput:
+		if line == "" || startsWithProtocolWhitespace(line) {
+			p.appendLine(&p.toolOutput, line)
+			events = append(events, Event{Version: EventProtocolVersion, Type: TypeToolOutput, Name: p.toolName, Output: line})
+			return events
+		}
+		events = append(events, p.flushTool()...)
+		p.state = stateOutput
+		p.appendLine(&p.outputBuf, line)
+		events = append(events, Event{Version: EventProtocolVersion, Type: TypeOutputDelta, Content: line})
+	case stateOutput:
+		p.appendLine(&p.outputBuf, line)
+		events = append(events, Event{Version: EventProtocolVersion, Type: TypeOutputDelta, Content: line})
+	default:
+		if strings.TrimSpace(line) == "" {
+			return nil
+		}
+		p.state = stateOutput
+		p.appendLine(&p.outputBuf, line)
+		events = append(events, Event{Version: EventProtocolVersion, Type: TypeOutputDelta, Content: line})
+	}
+
+	return events
+}
+
+func (p *ProtocolParser) processToolMarker(content string) []Event {
+	content = strings.TrimSpace(content)
+	var events []Event
+
+	switch {
+	case strings.HasSuffix(content, "(pending)"):
+		events = append(events, p.endActiveBlock()...)
+		p.toolName = strings.TrimSpace(strings.TrimSuffix(content, "(pending)"))
+		p.toolInput.Reset()
+		p.toolOutput.Reset()
+		p.state = stateToolInput
+		return append(events, Event{Version: EventProtocolVersion, Type: TypeToolStart, Name: p.toolName})
+	case strings.HasSuffix(content, "(completed)"):
+		if p.state == stateThinking || p.state == stateOutput {
+			events = append(events, p.endActiveBlock()...)
+		}
+		if p.toolName == "" {
+			p.toolName = strings.TrimSpace(strings.TrimSuffix(content, "(completed)"))
+		}
+		p.state = stateToolOutput
+		return events
+	case strings.HasSuffix(content, "(error)"):
+		if p.state == stateThinking || p.state == stateOutput {
+			events = append(events, p.endActiveBlock()...)
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(content, "(error)"))
+		if p.toolName == "" {
+			p.toolName = name
+		}
+		evt := Event{
+			Version: EventProtocolVersion,
+			Type:    TypeError,
+			Name:    p.toolName,
+			Input:   strings.TrimSpace(p.toolInput.String()),
+			Output:  strings.TrimSpace(p.toolOutput.String()),
+			Content: "tool execution failed",
+		}
+		p.resetTool()
+		p.state = stateIdle
+		return append(events, evt)
+	default:
+		events = append(events, p.endActiveBlock()...)
+		return append(events, Event{Version: EventProtocolVersion, Type: TypeToolStart, Name: content})
+	}
+}
+
+func (p *ProtocolParser) endActiveBlock() []Event {
+	switch p.state {
+	case stateThinking:
+		return p.flushThinking()
+	case stateToolInput, stateToolOutput:
+		return p.flushTool()
+	case stateOutput:
+		return p.flushOutput()
+	default:
+		return nil
+	}
+}
+
+func (p *ProtocolParser) flushThinking() []Event {
+	content := trimProtocolBlankLines(p.thinkingBuf.String())
+	p.thinkingBuf.Reset()
+	p.state = stateIdle
+
+	if content == "" {
+		return []Event{newEvent(TypeThinkingEnd)}
+	}
+
+	return []Event{{Version: EventProtocolVersion, Type: TypeThinkingEnd, Content: content}}
+}
+
+func (p *ProtocolParser) flushTool() []Event {
+	if p.toolName == "" {
+		p.resetTool()
+		p.state = stateIdle
+		return nil
+	}
+
+	evt := Event{
+		Version: EventProtocolVersion,
+		Type:    TypeToolEnd,
+		Name:    p.toolName,
+		Input:   strings.TrimSpace(p.toolInput.String()),
+		Output:  strings.TrimSpace(p.toolOutput.String()),
+	}
+	p.resetTool()
+	p.state = stateIdle
+	return []Event{evt}
+}
+
+func (p *ProtocolParser) flushOutput() []Event {
+	content := trimProtocolBlankLines(p.outputBuf.String())
+	p.outputBuf.Reset()
+	p.state = stateIdle
+
+	if content == "" {
+		return nil
+	}
+
+	return []Event{{Version: EventProtocolVersion, Type: TypeOutputFinal, Content: content}}
+}
+
+func (p *ProtocolParser) resetTool() {
+	p.toolName = ""
+	p.toolInput.Reset()
+	p.toolOutput.Reset()
+}
+
+func (p *ProtocolParser) appendLine(buf *bytes.Buffer, line string) {
+	if buf.Len() > 0 {
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(line)
+}
+
+func parseProtocolMarker(line string) (string, string, bool) {
+	if len(line) == 0 || line[0] != '[' {
+		return "", "", false
+	}
+
+	end := strings.IndexByte(line, ']')
+	if end < 1 {
+		return "", "", false
+	}
+
+	markerType := line[1:end]
+	switch markerType {
+	case "thinking", "tool", "done", "client", "acpx":
+	default:
+		return "", "", false
+	}
+
+	return markerType, strings.TrimPrefix(line[end+1:], " "), true
+}
+
+func normalizeProtocolChunk(raw string) string {
+	raw = stripANSI(raw)
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	return raw
+}
+
+func stripANSI(s string) string {
+	if strings.IndexByte(s, '') < 0 {
+		return s
+	}
+
+	var result bytes.Buffer
+	result.Grow(len(s))
+
+	for i := 0; i < len(s); {
+		if s[i] == '' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) {
+				c := s[i]
+				i++
+				if c >= 0x40 && c <= 0x7e {
+					break
+				}
+			}
+			continue
+		}
+
+		result.WriteByte(s[i])
+		i++
+	}
+
+	return result.String()
+}
+
+func trimProtocolBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
+	start := 0
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+
+	end := len(lines)
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+
+	return strings.Join(lines[start:end], "\n")
+}
+
+func startsWithProtocolWhitespace(s string) bool {
+	if s == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(s)
+	return unicode.IsSpace(r)
 }
 
 // truncate truncates a string to maxLen characters
