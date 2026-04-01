@@ -674,7 +674,7 @@ async function bootstrap() {
   if (!state.agents.length) state.agents = ['claude', 'codex'];
 
   els.agentSelect.innerHTML = state.agents
-    .map((agent) => `<option value="${escapeHTML(agent)}">${escapeHTML(agent)}</option>`)
+    .map((agent) => `<option value="${escapeHTML(agent)}"${agent === 'claude' ? ' selected' : ''}>${escapeHTML(agent)}</option>`)
     .join('');
 
   renderSessions();
