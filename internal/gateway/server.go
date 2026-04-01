@@ -508,7 +508,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 			}
 		}
 
-		if err := conn.SendJSON(JSONRPCRequest{JSONRPC: "2.0", Method: "stream", Params: map[string]interface{}{"id": req.ID, "session_id": sess.ID, "type": chunk.Type, "content": chunk.Content}}); err != nil {
+		// Strip ANSI escape sequences from content before sending to WebSocket
+		cleanContent := event.StripANSI(chunk.Content)
+		if err := conn.SendJSON(JSONRPCRequest{JSONRPC: "2.0", Method: "stream", Params: map[string]interface{}{"id": req.ID, "session_id": sess.ID, "type": chunk.Type, "content": cleanContent}}); err != nil {
 			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 			cancel()
 			return
@@ -537,8 +539,10 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		return
 	}
 
-	s.recordResult(sess.ID, req.ID, fullContent.String())
-	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": fullContent.String(), "session_id": sess.ID, "agent": ag.Type()}})
+	// Strip ANSI escape sequences from final content
+	finalContent := event.StripANSI(fullContent.String())
+	s.recordResult(sess.ID, req.ID, finalContent)
+	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}})
 }
 
 func (s *Server) prepareSession(sessionID, agentType string) *session.Session {
