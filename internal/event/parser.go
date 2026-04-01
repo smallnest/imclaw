@@ -277,8 +277,20 @@ func parseMarker(line string) (markerType string, content string, isMarker bool)
 	}
 
 	markerType = line[1:end]
+	if !isKnownMarker(markerType) {
+		return "", "", false
+	}
 	content = strings.TrimPrefix(line[end+1:], " ")
 	return markerType, content, true
+}
+
+func isKnownMarker(markerType string) bool {
+	switch markerType {
+	case "thinking", "tool", "done", "client", "acpx":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeChunk(raw string) string {

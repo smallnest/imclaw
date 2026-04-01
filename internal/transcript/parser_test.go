@@ -132,3 +132,20 @@ func TestParseStreamClosesAfterFlush(t *testing.T) {
 		t.Fatalf("unexpected second streamed message: %#v", got[1])
 	}
 }
+
+func TestParseKeepsUnknownBracketPrefixAsContent(t *testing.T) {
+	raw := `[thinking] planning
+[INFO] normal log line
+[1] list-like content`
+
+	got := Parse(raw)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %#v", got)
+	}
+	if got[0].Type != MessageThinking || got[0].Content != "planning" {
+		t.Fatalf("unexpected first message: %#v", got[0])
+	}
+	if got[1].Type != MessageOutput || got[1].Content != "[INFO] normal log line\n[1] list-like content" {
+		t.Fatalf("unexpected output message: %#v", got[1])
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/smallnest/imclaw/internal/event"
@@ -114,4 +115,88 @@ func TestShortFlagsAreRegistered(t *testing.T) {
 			t.Fatalf("shorthand -%s mapped to %q, want %q", shorthand, f.Name, expected)
 		}
 	}
+}
+
+func TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents(t *testing.T) {
+	*parseTranscript = true
+	defer func() { *parseTranscript = false }()
+
+	output := captureStdout(t, func() {
+		ok := handleParsedResult(map[string]interface{}{
+			"content": "[thinking] hello\nplain output",
+		}, false)
+		if !ok {
+			t.Fatal("expected output to be produced")
+		}
+	})
+
+	if !bytes.Contains([]byte(output), []byte(`"type": "thinking"`)) {
+		t.Fatalf("missing thinking event in fallback output: %q", output)
+	}
+	if !bytes.Contains([]byte(output), []byte(`"content": "plain output"`)) {
+		t.Fatalf("missing final output content in fallback output: %q", output)
+	}
+}
+
+func TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed(t *testing.T) {
+	*parseTranscript = true
+	defer func() { *parseTranscript = false }()
+
+	output := captureStdout(t, func() {
+		ok := handleParsedResult(map[string]interface{}{
+			"content": "[thinking] hello\nplain output",
+		}, true)
+		if !ok {
+			t.Fatal("expected function to report handled result")
+		}
+	})
+
+	if output != "" {
+		t.Fatalf("expected no duplicate transcript output, got %q", output)
+	}
+}
+
+func TestNotificationMatchesRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		params map[string]interface{}
+		reqID  string
+		want   bool
+	}{
+		{name: "matching id", params: map[string]interface{}{"id": "req-1"}, reqID: "req-1", want: true},
+		{name: "different id", params: map[string]interface{}{"id": "req-2"}, reqID: "req-1", want: false},
+		{name: "missing id tolerated", params: map[string]interface{}{"type": "content"}, reqID: "req-1", want: true},
+	}
+
+	for _, tt := range tests {
+		if got := notificationMatchesRequest(tt.params, tt.reqID); got != tt.want {
+			t.Fatalf("%s: got %v want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe failed: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+
+	fn()
+
+	_ = w.Close()
+	return <-done
 }

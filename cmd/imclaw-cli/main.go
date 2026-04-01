@@ -482,6 +482,9 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 			if params, ok := notification.Params.(map[string]interface{}); ok {
 				switch notification.Method {
 				case "stream":
+					if !notificationMatchesRequest(params, reqID) {
+						continue
+					}
 					chunkType, _ := params["type"].(string)
 					chunkContent, _ := params["content"].(string)
 					if onChunk != nil {
@@ -489,6 +492,9 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 					}
 					continue
 				case "event":
+					if !notificationMatchesRequest(params, reqID) {
+						continue
+					}
 					evt := parseEventParams(params)
 					if onEvent != nil {
 						onEvent(evt)
@@ -628,18 +634,22 @@ func printResponseContent(content string) {
 
 // handleParsedResult handles the response result with optional transcript parsing.
 // Returns true if output was produced, false otherwise.
-func handleParsedResult(result interface{}) bool {
+func handleParsedResult(result interface{}, sawStructuredEvent bool) bool {
 	if !*parseTranscript {
 		return false
 	}
 
 	if m, ok := result.(map[string]interface{}); ok {
 		if content, ok := m["content"].(string); ok {
-			if !looksLikeTranscript(content) {
+			if looksLikeTranscript(content) {
+				if sawStructuredEvent {
+					return true
+				}
 				printResponseContent(content)
 				return true
 			}
-			return true // transcript was already streamed
+			printResponseContent(content)
+			return true
 		}
 		printJSON(m)
 		return true
@@ -656,6 +666,14 @@ func streamHandler() func(chunkType, chunk string) {
 			writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
 		}
 	}
+}
+
+func notificationMatchesRequest(params map[string]interface{}, reqID string) bool {
+	id, ok := params["id"].(string)
+	if !ok || id == "" {
+		return true
+	}
+	return id == reqID
 }
 
 // parseEventParams parses event parameters from JSON-RPC notification params.
@@ -742,10 +760,8 @@ func sendAndExit(client *Client, message string) {
 	}
 
 	// In normal mode, content is already printed via callback.
-	// For transcript parsing, only print the final content when it was not a transcript.
-	if !sawStructuredEvent {
-		handleParsedResult(resp.Result)
-	}
+	// In transcript mode, fall back to the final content when structured events were unavailable.
+	handleParsedResult(resp.Result, sawStructuredEvent)
 }
 
 // startREPL starts the interactive REPL
@@ -869,9 +885,7 @@ func startREPL(client *Client) {
 			}
 
 			fmt.Println()
-			if !sawStructuredEvent {
-				handleParsedResult(resp.Result)
-			}
+			handleParsedResult(resp.Result, sawStructuredEvent)
 			fmt.Println()
 		}
 	}

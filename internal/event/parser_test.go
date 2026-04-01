@@ -213,6 +213,27 @@ func TestParserStripsANSIEscapes(t *testing.T) {
 	}
 }
 
+func TestParserTreatsUnknownBracketPrefixAsContent(t *testing.T) {
+	p := NewParser()
+
+	raw := `[thinking] planning
+[INFO] normal log line
+[1] list-like content`
+
+	events := p.Feed(raw)
+	events = append(events, p.Flush()...)
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %#v", events)
+	}
+	if events[0].Type != TypeThinking || events[0].Content != "planning" {
+		t.Fatalf("unexpected first event: %#v", events[0])
+	}
+	if events[1].Type != TypeOutput || events[1].Content != "[INFO] normal log line\n[1] list-like content" {
+		t.Fatalf("unexpected output event: %#v", events[1])
+	}
+}
+
 func TestEventIsTool(t *testing.T) {
 	tests := []struct {
 		event    Event
