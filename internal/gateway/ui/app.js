@@ -410,6 +410,22 @@ function renderMessages() {
     // Only render markdown when output is final, otherwise show plain text
     if (record.isFinal) {
       outputEl.innerHTML = markdownToHTML(record.finalContent || '');
+      // Add footer with timestamp and copy button
+      if (record.finalContent) {
+        const footer = document.createElement('div');
+        footer.className = 'message-footer';
+        const now = new Date();
+        footer.innerHTML = `
+          <span class="message-time">${now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+          <button class="copy-btn" title="复制输出内容">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        `;
+        bubble.appendChild(footer);
+      }
     } else {
       outputEl.innerHTML = escapeHTML(record.finalContent || '').replace(/\n/g, '<br>');
     }
@@ -419,6 +435,39 @@ function renderMessages() {
 
   scrollToBottom();
 }
+
+// Copy output content to clipboard
+function copyOutputContent(button) {
+  const bubble = button.closest('.bubble');
+  const outputContent = bubble.querySelector('.output-content');
+  if (!outputContent) return;
+
+  const text = outputContent.textContent || '';
+  navigator.clipboard.writeText(text).then(() => {
+    // Show success feedback
+    const originalHTML = button.innerHTML;
+    button.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+    `;
+    button.classList.add('copied');
+    setTimeout(() => {
+      button.innerHTML = originalHTML;
+      button.classList.remove('copied');
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+  });
+}
+
+// Event delegation for copy buttons
+els.messages.addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('.copy-btn');
+  if (copyBtn) {
+    copyOutputContent(copyBtn);
+  }
+});
 
 // ============ Session Loading ============
 
