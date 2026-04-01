@@ -32,3 +32,12 @@ func TestWriteStreamChunkFormatsErrorsOnStderr(t *testing.T) {
 		t.Fatalf("unexpected stderr output: %q", got)
 	}
 }
+
+func TestLooksLikeTranscript(t *testing.T) {
+	if !looksLikeTranscript("[thinking] hello") {
+		t.Fatal("expected transcript marker to be detected")
+	}
+	if looksLikeTranscript("plain answer only") {
+		t.Fatal("did not expect plain output to be treated as transcript")
+	}
+}

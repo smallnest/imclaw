@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/smallnest/imclaw/internal/transcript"
 	flag "github.com/spf13/pflag"
 )
 
@@ -66,6 +67,9 @@ var (
 
 	// Streaming mode
 	stream = flag.Bool("stream", true, "Enable streaming output (default: true)")
+
+	// Transcript parsing
+	parseTranscript = flag.Bool("parse-transcript", false, "Parse full IMClaw transcript output into structured message slices")
 
 	// Timeouts
 	timeout = flag.Int("timeout", 0, "Maximum time to wait for agent response (seconds)")
@@ -597,6 +601,22 @@ func writeStreamChunk(stdout, stderr io.Writer, chunkType, chunk string) {
 	}
 }
 
+func looksLikeTranscript(content string) bool {
+	return strings.Contains(content, "[thinking]") ||
+		strings.Contains(content, "[tool]") ||
+		strings.Contains(content, "[client]") ||
+		strings.Contains(content, "[acpx]") ||
+		strings.Contains(content, "[done]")
+}
+
+func printResponseContent(content string) {
+	if *parseTranscript && looksLikeTranscript(content) {
+		printJSON(transcript.Parse(content))
+		return
+	}
+	fmt.Println(content)
+}
+
 // sendAndExit sends a single message and exits
 func sendAndExit(client *Client, message string) {
 	if err := client.Connect(); err != nil {
@@ -611,7 +631,9 @@ func sendAndExit(client *Client, message string) {
 	if *stream {
 		// Use streaming mode
 		resp, err = client.AskStream(message, func(chunkType, chunk string) {
-			writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+			if !*parseTranscript {
+				writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+			}
 			// "done" type chunks are handled implicitly
 		})
 	} else {
@@ -634,7 +656,17 @@ func sendAndExit(client *Client, message string) {
 	if !*stream {
 		if result, ok := resp.Result.(map[string]interface{}); ok {
 			if content, ok := result["content"].(string); ok {
-				fmt.Println(content)
+				printResponseContent(content)
+			} else {
+				printJSON(result)
+			}
+		} else {
+			printJSON(resp.Result)
+		}
+	} else if *parseTranscript {
+		if result, ok := resp.Result.(map[string]interface{}); ok {
+			if content, ok := result["content"].(string); ok {
+				printResponseContent(content)
 			} else {
 				printJSON(result)
 			}
@@ -750,7 +782,9 @@ func startREPL(client *Client) {
 			if *stream {
 				fmt.Println()
 				resp, err = client.AskStream(line, func(chunkType, chunk string) {
-					writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+					if !*parseTranscript {
+						writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+					}
 				})
 			} else {
 				resp, err = client.Ask(line)
@@ -771,7 +805,18 @@ func startREPL(client *Client) {
 				fmt.Println()
 				if result, ok := resp.Result.(map[string]interface{}); ok {
 					if content, ok := result["content"].(string); ok {
-						fmt.Println(content)
+						printResponseContent(content)
+					} else {
+						printJSON(result)
+					}
+				} else {
+					printJSON(resp.Result)
+				}
+			} else if *parseTranscript {
+				fmt.Println()
+				if result, ok := resp.Result.(map[string]interface{}); ok {
+					if content, ok := result["content"].(string); ok {
+						printResponseContent(content)
 					} else {
 						printJSON(result)
 					}
@@ -802,6 +847,7 @@ Options (can be set via flags at startup):
   --approve-reads       Auto-approve read requests, prompt for writes
   --deny-all            Deny all permission requests
   --format <fmt>        Output format: text, json, quiet
+  --parse-transcript    Parse final IMClaw transcript into structured messages
   --model <id>          Agent model id
   --timeout <seconds>   Maximum time to wait for agent response
   --ttl <seconds>       Queue owner idle TTL before shutdown
