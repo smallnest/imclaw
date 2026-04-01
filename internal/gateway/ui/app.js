@@ -57,17 +57,36 @@ function escapeHTML(value = '') {
   }[char]));
 }
 
-// Filter out status messages like [acpx], [client], and [done]
+// Filter out status messages and ANSI remnants
 function filterStatusMessages(content) {
   if (!content) return content;
+
+  // Remove common ANSI escape code remnants
+  content = content.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  content = content.replace(/\[[0-9]+m/g, '');
+
   return content
     .split('\n')
     .filter(line => {
       const trimmed = line.trim();
-      // Skip lines that start with [acpx], [client], or [done]
-      if (trimmed.startsWith('[acpx]') || trimmed.startsWith('[client]') || trimmed.startsWith('[done]')) {
+
+      // Skip empty lines
+      if (!trimmed) return false;
+
+      // Skip lines that start with status markers
+      if (trimmed.startsWith('[acpx]') ||
+          trimmed.startsWith('[client]') ||
+          trimmed.startsWith('[done]') ||
+          trimmed.startsWith('[thinking]') ||
+          trimmed.startsWith('[tool]')) {
         return false;
       }
+
+      // Skip lines that are only ANSI remnants like [2m, [0m, etc.
+      if (/^\[[0-9;]+[a-zA-Z]\]?$/.test(trimmed)) {
+        return false;
+      }
+
       return true;
     })
     .join('\n')
