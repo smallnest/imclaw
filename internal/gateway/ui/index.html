@@ -3,83 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>IMClaw Sessions</title>
+  <title>IMClaw Chat</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <div class="shell">
+  <div class="app">
+    <!-- Left Sidebar: Session List -->
     <aside class="sidebar">
-      <div class="brand">
-        <p class="eyebrow">IMClaw</p>
-        <h1>Sessions</h1>
-        <button id="new-session" class="ghost">New Session</button>
+      <div class="sidebar-header">
+        <h1 class="logo">IMClaw</h1>
+        <button id="new-session" class="new-chat-btn" title="New Chat">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
       </div>
-      <div class="sidebar-toolbar">
-        <input id="session-filter" type="search" placeholder="Filter sessions">
+      <div class="sidebar-search">
+        <input id="session-filter" type="search" placeholder="Search conversations...">
       </div>
       <div id="session-list" class="session-list"></div>
+      <div class="sidebar-footer">
+        <select id="agent-select" class="agent-select"></select>
+      </div>
     </aside>
-    <main class="main">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">Gateway UI</p>
-          <h2 id="session-title">Select a session</h2>
-          <p id="session-meta" class="muted">Active and historical session output appears here.</p>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+      <!-- Chat Header -->
+      <header class="chat-header">
+        <div class="chat-title">
+          <h2 id="session-title">New Chat</h2>
+          <span id="session-meta" class="session-meta"></span>
         </div>
-        <div class="hero-actions">
-          <span id="ws-status" class="status-pill offline">Offline</span>
-          <label>
-            <span>Agent</span>
-            <select id="agent-select"></select>
-          </label>
+        <div class="chat-actions">
+          <span id="ws-status" class="status-indicator offline">Offline</span>
         </div>
       </header>
 
-      <section class="composer card">
-        <div class="composer-head">
-          <strong>Prompt</strong>
-          <span class="muted">Stream directly from the browser</span>
+      <!-- Messages Container -->
+      <div id="messages" class="messages">
+        <div class="welcome-screen">
+          <div class="welcome-icon">💬</div>
+          <h2>Welcome to IMClaw</h2>
+          <p>Select a conversation or start a new one</p>
         </div>
-        <textarea id="prompt-input" rows="4" placeholder="Send a prompt to this session"></textarea>
-        <div class="composer-actions">
-          <button id="send-prompt">Send</button>
+      </div>
+
+      <!-- Input Area -->
+      <div class="input-area">
+        <div class="input-container">
+          <textarea
+            id="prompt-input"
+            rows="1"
+            placeholder="Send a message..."
+            autocomplete="off"
+          ></textarea>
+          <button id="send-prompt" class="send-btn" title="Send message">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
         </div>
-      </section>
-
-      <section class="detail-grid">
-        <article class="card timeline-card">
-          <div class="section-head">
-            <strong>Timeline</strong>
-            <span class="muted">Prompts, events, results, and errors</span>
-          </div>
-          <div id="timeline" class="timeline"></div>
-        </article>
-
-        <article class="card live-card">
-          <div class="section-head">
-            <strong>Live Stream</strong>
-            <span class="muted">Thinking, tools, output, and permission-related failures</span>
-          </div>
-          <div class="live-columns">
-            <section>
-              <h3>Thinking</h3>
-              <pre id="live-thinking"></pre>
-            </section>
-            <section>
-              <h3>Tool Activity</h3>
-              <div id="live-tools" class="tool-stack"></div>
-            </section>
-            <section>
-              <h3>Final Output</h3>
-              <pre id="live-output"></pre>
-            </section>
-            <section>
-              <h3>Errors</h3>
-              <div id="live-errors" class="error-stack"></div>
-            </section>
-          </div>
-        </article>
-      </section>
+        <p class="input-hint">Press Enter to send, Shift+Enter for new line</p>
+      </div>
     </main>
   </div>
   <script src="/assets/app.js" defer></script>
