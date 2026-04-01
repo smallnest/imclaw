@@ -6,7 +6,7 @@ const state = {
   selectedSessionId: null,
   currentSession: null,
   pending: new Map(),
-  currentMessage: null, // Current streaming message element
+  isStreaming: false,
 };
 
 const els = {
@@ -55,6 +55,15 @@ function escapeHTML(value = '') {
   return value.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
+}
+
+// Render markdown using marked library
+function markdownToHTML(text) {
+  if (!text) return '';
+  return marked.parse(text, {
+    breaks: true,
+    gfm: true
+  });
 }
 
 // Filter out status messages and ANSI remnants
@@ -184,7 +193,14 @@ function createThinkingBlock(content) {
   div.className = 'thinking-block collapsible';
   div.innerHTML = `
     <div class="collapsible-header" onclick="toggleCollapse(this)">
-      <span class="label">💭 思考</span>
+      <span class="label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18h6"/>
+          <path d="M10 22h4"/>
+          <path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>
+        </svg>
+        思考
+      </span>
       <span class="toggle-icon">▼</span>
     </div>
     <div class="collapsible-content">
@@ -194,21 +210,25 @@ function createThinkingBlock(content) {
   return div;
 }
 
-function createToolBlock(name, type, content) {
-  // Only show completed tools with a simple inline style
-  if (type === 'completed') {
-    const div = document.createElement('div');
-    div.className = 'tool-block collapsible';
-    div.innerHTML = `
-      <div class="collapsible-header no-content">
-        <span class="label"><span class="tool-name">✓ ${escapeHTML(name)}</span></span>
-      </div>
-    `;
-    return div;
-  }
-
-  // Skip other tool events
-  return null;
+function createToolBlock(name, details) {
+  if (!name || name === 'Terminal') return null;
+  const div = document.createElement('div');
+  div.className = 'tool-block collapsible';
+  const bodyText = details || '调用完成';
+  div.innerHTML = `
+    <div class="collapsible-header" onclick="toggleCollapse(this)">
+      <svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+      </svg>
+      <span class="tool-name">工具</span>
+      <span class="toggle-icon">▼</span>
+    </div>
+    <div class="collapsible-content">
+      <div class="tool-title">${escapeHTML(name)}</div>
+      <pre>${escapeHTML(bodyText)}</pre>
+    </div>
+  `;
+  return div;
 }
 
 // Global function for toggling collapse
@@ -238,22 +258,32 @@ function createErrorBlock(content) {
   return div;
 }
 
-function appendToCurrentMessage(block) {
-  if (!state.currentMessage) return;
-  const bubble = state.currentMessage.querySelector('.bubble');
-  if (bubble) {
-    bubble.appendChild(block);
-    scrollToBottom();
-  }
+function addThinkingBlock(record, content) {
+  const filteredContent = filterStatusMessages(content);
+  if (!filteredContent) return;
+  record.blocks.push({ kind: 'thinking', content: filteredContent });
 }
 
-function setOutputContent(content) {
-  if (!state.currentMessage) return;
-  const output = state.currentMessage.querySelector('.output-content');
-  if (output) {
-    output.textContent = content;
-    scrollToBottom();
-  }
+function addToolBlock(record, event) {
+  if (!event || !event.name || event.name === 'Terminal') return;
+  const lines = [];
+  if (event.input) lines.push(`输入：${event.input}`);
+  if (event.output) lines.push(`输出：${event.output}`);
+  if (event.content) lines.push(event.content);
+  const details = lines.length ? lines.join('\n\n') : '调用完成';
+  record.blocks.push({ kind: 'tool', name: event.name, details });
+}
+
+function addErrorBlock(record, content) {
+  const filtered = filterStatusMessages(content || '未知错误');
+  if (!filtered) return;
+  record.blocks.push({ kind: 'error', content: filtered });
+}
+
+function setRecordOutput(record, content, isFinal) {
+  if (!content) return;
+  record.finalContent = filterStatusMessages(content);
+  record.isFinal = isFinal;
 }
 
 function scrollToBottom() {
@@ -277,71 +307,104 @@ function renderMessages() {
     return;
   }
 
-  els.messages.innerHTML = '';
-  let currentUserMessage = null;
-  let currentAssistantMessage = null;
+  const records = new Map();
+  const renderQueue = [];
+
+  function getOrCreateRecord(requestId) {
+    const key = requestId || '__orphan__';
+    if (!records.has(key)) {
+      records.set(key, { element: createMessageElement('assistant'), blocks: [], finalContent: '', slotQueued: false });
+    }
+    return records.get(key);
+  }
+
+  function queueAssistant(requestId) {
+    const key = requestId || '__orphan__';
+    const record = getOrCreateRecord(requestId);
+    if (!record.slotQueued) {
+      renderQueue.push({ type: 'assistant', requestId: key });
+      record.slotQueued = true;
+    }
+    return record;
+  }
 
   for (const entry of activity) {
     if (entry.type === 'prompt') {
-      // New user message
-      if (currentAssistantMessage) {
-        els.messages.appendChild(currentAssistantMessage);
-      }
-      currentAssistantMessage = null;
-      currentUserMessage = createMessageElement('user', entry.prompt);
-      els.messages.appendChild(currentUserMessage);
-    } else if (entry.type === 'result') {
-      // Final result
-      if (!currentAssistantMessage) {
-        currentAssistantMessage = createMessageElement('assistant');
-      }
-      const output = currentAssistantMessage.querySelector('.output-content');
-      if (output) output.textContent = filterStatusMessages(entry.content) || '';
-    } else if (entry.type === 'event' && entry.event) {
-      // Events (thinking, tools, errors)
-      if (!currentAssistantMessage) {
-        currentAssistantMessage = createMessageElement('assistant');
-      }
-      const bubble = currentAssistantMessage.querySelector('.bubble');
-      const event = entry.event;
+      const userNode = createMessageElement('user', entry.prompt);
+      renderQueue.push({ type: 'user', node: userNode });
+      queueAssistant(entry.request_id);
+      continue;
+    }
 
-      switch (event.type) {
-        case 'thinking_end':
-          // Only show thinking when complete
-          const filteredContent = filterStatusMessages(event.content);
-          if (filteredContent) {
-            const thinkingBlock = createThinkingBlock(filteredContent);
-            if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.firstChild);
-          }
-          break;
+    const record = getOrCreateRecord(entry.request_id);
+    if (entry.type === 'result') {
+      setRecordOutput(record, entry.content, true);
+      continue;
+    }
+    if (entry.type === 'error') {
+      addErrorBlock(record, entry.error);
+      continue;
+    }
+    if (entry.type !== 'event' || !entry.event) continue;
 
-        case 'tool_end':
-          // Only show completed tool calls
-          const toolBlock = createToolBlock(event.name || 'tool', 'completed');
-          if (toolBlock) bubble.appendChild(toolBlock);
-          break;
-
-        case 'output_final':
-          // Final output content
-          const output = currentAssistantMessage.querySelector('.output-content');
-          if (output) output.textContent = filterStatusMessages(event.content) || '';
-          break;
-
-        case 'error':
-          bubble.appendChild(createErrorBlock(event.content || '未知错误'));
-          break;
-      }
-    } else if (entry.type === 'error') {
-      if (!currentAssistantMessage) {
-        currentAssistantMessage = createMessageElement('assistant');
-      }
-      const bubble = currentAssistantMessage.querySelector('.bubble');
-      bubble.appendChild(createErrorBlock(entry.error || '未知错误'));
+    const event = entry.event;
+    switch (event.type) {
+      case 'thinking_end':
+        addThinkingBlock(record, event.content);
+        break;
+      case 'tool_end':
+        addToolBlock(record, event);
+        break;
+      case 'output_delta':
+        setRecordOutput(record, event.content, false);
+        break;
+      case 'output_final':
+        setRecordOutput(record, event.content, true);
+        break;
+      case 'error':
+        addErrorBlock(record, event.content);
+        break;
     }
   }
 
-  if (currentAssistantMessage) {
-    els.messages.appendChild(currentAssistantMessage);
+  for (const [key, record] of records) {
+    if (!record.slotQueued) {
+      renderQueue.push({ type: 'assistant', requestId: key });
+      record.slotQueued = true;
+    }
+  }
+
+  els.messages.innerHTML = '';
+  for (const item of renderQueue) {
+    if (item.type === 'user') {
+      els.messages.appendChild(item.node);
+      continue;
+    }
+    const record = records.get(item.requestId);
+    if (!record) continue;
+    const bubble = record.element.querySelector('.bubble');
+    bubble.innerHTML = '';
+    for (const block of record.blocks) {
+      let blockEl;
+      if (block.kind === 'thinking') {
+        blockEl = createThinkingBlock(block.content);
+      } else if (block.kind === 'tool') {
+        blockEl = createToolBlock(block.name, block.details);
+      } else if (block.kind === 'error') {
+        blockEl = createErrorBlock(block.content);
+      }
+      if (blockEl) bubble.appendChild(blockEl);
+    }
+    const outputEl = document.createElement('div');
+    outputEl.className = 'output-content';
+    // Only render markdown when output is final, otherwise show plain text
+    if (record.isFinal) {
+      outputEl.innerHTML = markdownToHTML(record.finalContent || '');
+    } else {
+      outputEl.innerHTML = escapeHTML(record.finalContent || '').replace(/\n/g, '<br>');
+    }
+    bubble.appendChild(outputEl);
+    els.messages.appendChild(record.element);
   }
 
   scrollToBottom();
@@ -451,65 +514,27 @@ function connectWS() {
     if (message.method === 'session.activity') {
       const { session_id: sessionId, activity } = message.params;
       if (sessionId === state.selectedSessionId && state.currentSession) {
-        // Add activity to current session
         state.currentSession.activity = [...(state.currentSession.activity || []), activity];
-
-        // Handle real-time updates
-        if (activity.type === 'prompt') {
-          // New user message - clear and re-render
-          renderMessages();
-        } else if (activity.type === 'event' && activity.event) {
-          // Append event to current message
-          handleStreamEvent(activity.event);
-        } else if (activity.type === 'result') {
-          // Final result
-          setOutputContent(filterStatusMessages(activity.content) || '');
-        } else if (activity.type === 'error') {
-          appendToCurrentMessage(createErrorBlock(activity.error || '未知错误'));
+        renderMessages();
+        // Check if streaming is complete
+        if (activity.type === 'event' && activity.event) {
+          const eventType = activity.event.type;
+          if (eventType === 'output_final' || eventType === 'done' || eventType === 'error') {
+            state.isStreaming = false;
+            els.sendPrompt.disabled = false;
+            els.promptInput.disabled = false;
+            els.promptInput.focus();
+          }
+        } else if (activity.type === 'result' || activity.type === 'error') {
+          state.isStreaming = false;
+          els.sendPrompt.disabled = false;
+          els.promptInput.disabled = false;
+          els.promptInput.focus();
         }
       }
       return;
     }
   });
-}
-
-function handleStreamEvent(event) {
-  // Ensure we have a current message
-  if (!state.currentMessage || !els.messages.contains(state.currentMessage)) {
-    state.currentMessage = createMessageElement('assistant');
-    els.messages.appendChild(state.currentMessage);
-  }
-
-  const bubble = state.currentMessage.querySelector('.bubble');
-
-  switch (event.type) {
-    case 'thinking_end':
-      // Only show thinking when complete
-      const filteredContent = filterStatusMessages(event.content);
-      if (filteredContent) {
-        const thinkingBlock = createThinkingBlock(filteredContent);
-        if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.querySelector('.output-content') || bubble.firstChild);
-      }
-      break;
-
-    case 'tool_end':
-      // Only show completed tool calls
-      const toolBlock = createToolBlock(event.name || 'tool', 'completed');
-      if (toolBlock) bubble.appendChild(toolBlock);
-      break;
-
-    case 'output_final':
-      // Final output content
-      const output = state.currentMessage.querySelector('.output-content');
-      if (output) output.textContent = filterStatusMessages(event.content) || '';
-      break;
-
-    case 'error':
-      appendToCurrentMessage(createErrorBlock(event.content || '未知错误'));
-      break;
-  }
-
-  scrollToBottom();
 }
 
 // ============ Bootstrap ============
@@ -584,6 +609,9 @@ els.promptInput.addEventListener('input', () => {
 
 // Send prompt
 async function sendPrompt() {
+  // Prevent sending while streaming
+  if (state.isStreaming) return;
+
   if (!state.selectedSessionId) {
     // Create new session first
     try {
@@ -606,15 +634,10 @@ async function sendPrompt() {
   }
 
   try {
+    // Disable input while streaming
+    state.isStreaming = true;
     els.sendPrompt.disabled = true;
-
-    // Add user message to UI immediately
-    const userMsg = createMessageElement('user', content);
-    els.messages.appendChild(userMsg);
-
-    // Create placeholder for assistant response
-    state.currentMessage = createMessageElement('assistant');
-    els.messages.appendChild(state.currentMessage);
+    els.promptInput.disabled = true;
 
     // Clear input
     els.promptInput.value = '';
@@ -628,14 +651,13 @@ async function sendPrompt() {
       permissions: 'approve-all',
     });
 
-    // Reload session to get final state
-    await loadSession(state.selectedSessionId);
+    // Note: Input will be re-enabled when we receive output_final/done/error event
   } catch (error) {
     console.error('Failed to send prompt:', error);
-    appendToCurrentMessage(createErrorBlock(error.message));
-  } finally {
+    state.isStreaming = false;
     els.sendPrompt.disabled = false;
-    els.promptInput.focus();
+    els.promptInput.disabled = false;
+    await loadSession(state.selectedSessionId);
   }
 }
 

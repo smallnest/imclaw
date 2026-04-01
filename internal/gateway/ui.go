@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -20,7 +22,15 @@ var (
 	BuildTime = "unknown"
 	// BuildCommit is the git commit hash
 	BuildCommit = "unknown"
+	// UIAssetsVersion is derived from the static assets so it changes automatically.
+	UIAssetsVersion = ""
 )
+
+func init() {
+	if UIAssetsVersion == "" {
+		UIAssetsVersion = computeUIAssetsVersion()
+	}
+}
 
 //go:embed ui/*
 var uiAssets embed.FS
@@ -30,6 +40,19 @@ type uiFileSystem struct {
 	embedded  embed.FS
 	devMode   bool
 	devFSRoot string
+}
+
+func computeUIAssetsVersion() string {
+	files := []string{"app.js", "styles.css"}
+	hasher := sha256.New()
+	for _, name := range files {
+		data, err := uiAssets.ReadFile(path.Join("ui", name))
+		if err != nil {
+			continue
+		}
+		hasher.Write(data)
+	}
+	return hex.EncodeToString(hasher.Sum(nil))[:8]
 }
 
 // newUIFileSystem creates a new UI filesystem handler.
@@ -122,6 +145,7 @@ func (h *uiHandler) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 
 	// Add version query parameter to static assets for cache busting
 	version := BuildVersion
+	assetVersion := UIAssetsVersion
 	if version == "dev" || version == "unknown" {
 		version = BuildCommit
 	}
@@ -130,8 +154,8 @@ func (h *uiHandler) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Replace asset URLs with versioned URLs
-	html = strings.Replace(html, `href="/assets/styles.css"`, fmt.Sprintf(`href="/assets/styles.css?v=%s"`, version), 1)
-	html = strings.Replace(html, `src="/assets/app.js"`, fmt.Sprintf(`src="/assets/app.js?v=%s"`, version), 1)
+	html = strings.Replace(html, `href="/assets/styles.css"`, fmt.Sprintf(`href="/assets/styles.css?v=%s"`, assetVersion), 1)
+	html = strings.Replace(html, `src="/assets/app.js"`, fmt.Sprintf(`src="/assets/app.js?v=%s"`, assetVersion), 1)
 
 	// Inject build information into HTML head
 	html = strings.Replace(html, "<head>", fmt.Sprintf(`<head>

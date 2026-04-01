@@ -487,6 +487,8 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 
 	var fullContent strings.Builder
 	var streamErr string
+	var finalOutput string
+	var sawFinalOutput bool
 	parser := event.NewParser()
 	sawNativeEvents := false
 	sawErrorEvent := false
@@ -499,6 +501,10 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		for _, evt := range buildStructuredEvents(parser, chunk) {
 			if evt.Type == agent.TypeError {
 				sawErrorEvent = true
+			}
+			if evt.Type == agent.TypeOutputFinal {
+				finalOutput = evt.Content
+				sawFinalOutput = true
 			}
 			s.recordEvent(sess.ID, req.ID, evt)
 			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
@@ -517,14 +523,18 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		}
 	}
 
-	if !sawNativeEvents {
-		for _, evt := range flushStructuredEvents(parser, streamErr == "") {
-			if evt.Type == agent.TypeError {
-				sawErrorEvent = true
-			}
-			s.recordEvent(sess.ID, req.ID, evt)
-			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
-				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+		if !sawNativeEvents {
+			for _, evt := range flushStructuredEvents(parser, streamErr == "") {
+				if evt.Type == agent.TypeError {
+					sawErrorEvent = true
+				}
+				if evt.Type == agent.TypeOutputFinal {
+					finalOutput = evt.Content
+					sawFinalOutput = true
+				}
+				s.recordEvent(sess.ID, req.ID, evt)
+				if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+					log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 				cancel()
 				return
 			}
@@ -539,8 +549,12 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		return
 	}
 
-	// Strip ANSI escape sequences and filter transcript markers from final content
+	// Prefer the protocol-level final output when available. Aggregating raw stream
+	// content can include thinking transcript text for native-event agents.
 	finalContent := filterTranscriptMarkers(event.StripANSI(fullContent.String()))
+	if sawFinalOutput {
+		finalContent = filterTranscriptMarkers(event.StripANSI(finalOutput))
+	}
 	s.recordResult(sess.ID, req.ID, finalContent)
 	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}})
 }
@@ -731,7 +745,9 @@ func convertLegacyEvents(legacy []event.Event) []agent.Event {
 		case event.TypeToolError, event.TypeError:
 			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeError, Content: evt.Content, Name: evt.Name, Input: evt.Input, Output: evt.Output})
 		case event.TypeOutput:
-			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeOutputFinal, Content: evt.Content})
+			// Filter transcript markers from output_final content
+			content := filterTranscriptMarkers(evt.Content)
+			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeOutputFinal, Content: content})
 		}
 	}
 	return events
