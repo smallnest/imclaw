@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/smallnest/imclaw/internal/transcript"
+	flag "github.com/spf13/pflag"
 )
 
 func TestWriteStreamChunkWritesContentWithoutExtraNewline(t *testing.T) {
@@ -87,5 +88,26 @@ func TestWriteParsedMessageOutputsJSONLine(t *testing.T) {
 
 	if got := stdout.String(); got != "{\"type\":\"thinking\",\"content\":\"hello\"}\n" {
 		t.Fatalf("unexpected parsed message output: %q", got)
+	}
+}
+
+func TestShortFlagsAreRegistered(t *testing.T) {
+	tests := map[string]string{
+		"s": "server",
+		"t": "token",
+		"S": "session",
+		"a": "agent",
+		"C": "cwd",
+		"v": "version",
+	}
+
+	for shorthand, expected := range tests {
+		f := flag.CommandLine.ShorthandLookup(shorthand)
+		if f == nil {
+			t.Fatalf("missing shorthand -%s", shorthand)
+		}
+		if f.Name != expected {
+			t.Fatalf("shorthand -%s mapped to %q, want %q", shorthand, f.Name, expected)
+		}
 	}
 }

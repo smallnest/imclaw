@@ -21,20 +21,20 @@ import (
 
 var (
 	// Server connection (HTTP and WebSocket on same port)
-	serverURL = flag.String("server", "ws://localhost:8080/ws", "IMClaw server WebSocket URL")
-	authToken = flag.String("token", "", "Authentication token")
+	serverURL = flag.StringP("server", "s", "ws://localhost:8080/ws", "IMClaw server WebSocket URL")
+	authToken = flag.StringP("token", "t", "", "Authentication token")
 
 	// Session
-	sessionID = flag.String("session", "", "Session ID to use (empty for auto-create)")
+	sessionID = flag.StringP("session", "S", "", "Session ID to use (empty for auto-create)")
 
 	// One-shot prompt
 	promptFlag = flag.StringP("prompt", "p", "", "Prompt message (one-shot mode)")
 
 	// Agent selection
-	agentType = flag.String("agent", "", "Agent type (claude, codex, etc.)")
+	agentType = flag.StringP("agent", "a", "", "Agent type (claude, codex, etc.)")
 
 	// Working directory
-	cwd = flag.String("cwd", "", "Working directory")
+	cwd = flag.StringP("cwd", "C", "", "Working directory")
 
 	// Permission flags
 	approveAll   = flag.Bool("approve-all", true, "Auto-approve all permission requests")
@@ -77,7 +77,7 @@ var (
 	verbose = flag.Bool("verbose", false, "Enable verbose debug logs")
 
 	// Version
-	showVersion = flag.Bool("version", false, "Show version information")
+	showVersion = flag.BoolP("version", "v", false, "Show version information")
 
 	// 版本信息
 	Version   = "dev"
