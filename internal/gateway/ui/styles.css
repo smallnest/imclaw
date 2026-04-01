@@ -73,6 +73,31 @@ html, body {
   font-size: 18px;
   font-weight: 600;
   color: var(--sidebar-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bee-logo {
+  display: inline-block;
+  font-size: 16px;
+  transform: scaleX(-1);
+  animation: bee-fly 1.5s ease-in-out infinite;
+}
+
+@keyframes bee-fly {
+  0%, 100% {
+    transform: scaleX(-1) translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: scaleX(-1) translateY(-4px) rotate(8deg);
+  }
+  50% {
+    transform: scaleX(-1) translateY(0) rotate(0deg);
+  }
+  75% {
+    transform: scaleX(-1) translateY(-3px) rotate(-8deg);
+  }
 }
 
 .new-chat-btn {
@@ -251,6 +276,34 @@ html, body {
   margin-bottom: 16px;
 }
 
+.welcome-icon.bee-logo {
+  animation: bee-fly-around 4s ease-in-out infinite;
+}
+
+@keyframes bee-fly-around {
+  0% {
+    transform: translateX(0) scaleX(1);
+  }
+  25% {
+    transform: translateX(-60px) scaleX(1);
+  }
+  26% {
+    transform: translateX(-60px) scaleX(-1);
+  }
+  50% {
+    transform: translateX(0) scaleX(-1);
+  }
+  75% {
+    transform: translateX(60px) scaleX(-1);
+  }
+  76% {
+    transform: translateX(60px) scaleX(1);
+  }
+  100% {
+    transform: translateX(0) scaleX(1);
+  }
+}
+
 .welcome-screen h2 {
   font-size: 24px;
   font-weight: 600;
@@ -392,12 +445,6 @@ html, body {
   gap: 6px;
 }
 
-.thinking-block .label svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
 .thinking-block .collapsible-content pre {
   color: var(--text-secondary);
 }
@@ -423,8 +470,6 @@ html, body {
 }
 
 .tool-block .tool-icon {
-  width: 16px;
-  height: 16px;
   flex-shrink: 0;
 }
 

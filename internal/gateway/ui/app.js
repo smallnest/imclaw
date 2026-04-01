@@ -194,7 +194,7 @@ function createThinkingBlock(content) {
   div.innerHTML = `
     <div class="collapsible-header" onclick="toggleCollapse(this)">
       <span class="label">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 18h6"/>
           <path d="M10 22h4"/>
           <path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>
@@ -217,7 +217,7 @@ function createToolBlock(name, details) {
   const bodyText = details || '调用完成';
   div.innerHTML = `
     <div class="collapsible-header" onclick="toggleCollapse(this)">
-      <svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg class="tool-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
       </svg>
       <span class="tool-name">工具</span>
@@ -299,7 +299,7 @@ function renderMessages() {
   if (!activity.length) {
     els.messages.innerHTML = `
       <div class="welcome-screen">
-        <div class="welcome-icon">💬</div>
+        <div class="welcome-icon bee-logo">🐝</div>
         <h2>开始对话</h2>
         <p>发送消息开始对话</p>
       </div>
