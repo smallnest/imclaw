@@ -14,7 +14,11 @@ CLI_NAME := imclaw-cli
 MAIN_PATH := ./cmd/imclaw
 CLI_PATH := ./cmd/imclaw-cli
 BUILD_DIR := bin
-LD_FLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+BUILD_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+LD_FLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) \
+	-X github.com/smallnest/imclaw/internal/gateway.BuildVersion=$(VERSION) \
+	-X github.com/smallnest/imclaw/internal/gateway.BuildTime=$(BUILD_TIME) \
+	-X github.com/smallnest/imclaw/internal/gateway.BuildCommit=$(BUILD_COMMIT)"
 
 # Go 相关
 GOCMD := go

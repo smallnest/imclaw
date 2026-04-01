@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IMClaw Sessions</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <p class="eyebrow">IMClaw</p>
+        <h1>Sessions</h1>
+        <button id="new-session" class="ghost">New Session</button>
+      </div>
+      <div class="sidebar-toolbar">
+        <input id="session-filter" type="search" placeholder="Filter sessions">
+      </div>
+      <div id="session-list" class="session-list"></div>
+    </aside>
+    <main class="main">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Gateway UI</p>
+          <h2 id="session-title">Select a session</h2>
+          <p id="session-meta" class="muted">Active and historical session output appears here.</p>
+        </div>
+        <div class="hero-actions">
+          <span id="ws-status" class="status-pill offline">Offline</span>
+          <label>
+            <span>Agent</span>
+            <select id="agent-select"></select>
+          </label>
+        </div>
+      </header>
+
+      <section class="composer card">
+        <div class="composer-head">
+          <strong>Prompt</strong>
+          <span class="muted">Stream directly from the browser</span>
+        </div>
+        <textarea id="prompt-input" rows="4" placeholder="Send a prompt to this session"></textarea>
+        <div class="composer-actions">
+          <button id="send-prompt">Send</button>
+        </div>
+      </section>
+
+      <section class="detail-grid">
+        <article class="card timeline-card">
+          <div class="section-head">
+            <strong>Timeline</strong>
+            <span class="muted">Prompts, events, results, and errors</span>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </article>
+
+        <article class="card live-card">
+          <div class="section-head">
+            <strong>Live Stream</strong>
+            <span class="muted">Thinking, tools, output, and permission-related failures</span>
+          </div>
+          <div class="live-columns">
+            <section>
+              <h3>Thinking</h3>
+              <pre id="live-thinking"></pre>
+            </section>
+            <section>
+              <h3>Tool Activity</h3>
+              <div id="live-tools" class="tool-stack"></div>
+            </section>
+            <section>
+              <h3>Final Output</h3>
+              <pre id="live-output"></pre>
+            </section>
+            <section>
+              <h3>Errors</h3>
+              <div id="live-errors" class="error-stack"></div>
+            </section>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
