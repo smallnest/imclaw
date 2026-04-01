@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>IMClaw Chat</title>
+  <title>IMClaw 对话</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <h1 class="logo">IMClaw</h1>
-        <button id="new-session" class="new-chat-btn" title="New Chat">
+        <button id="new-session" class="new-chat-btn" title="新建对话">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -20,7 +20,7 @@
         </button>
       </div>
       <div class="sidebar-search">
-        <input id="session-filter" type="search" placeholder="Search conversations...">
+        <input id="session-filter" type="search" placeholder="搜索对话...">
       </div>
       <div id="session-list" class="session-list"></div>
       <div class="sidebar-footer">
@@ -33,11 +33,11 @@
       <!-- Chat Header -->
       <header class="chat-header">
         <div class="chat-title">
-          <h2 id="session-title">New Chat</h2>
+          <h2 id="session-title">新对话</h2>
           <span id="session-meta" class="session-meta"></span>
         </div>
         <div class="chat-actions">
-          <span id="ws-status" class="status-indicator offline">Offline</span>
+          <span id="ws-status" class="status-indicator offline">离线</span>
         </div>
       </header>
 
@@ -45,8 +45,8 @@
       <div id="messages" class="messages">
         <div class="welcome-screen">
           <div class="welcome-icon">💬</div>
-          <h2>Welcome to IMClaw</h2>
-          <p>Select a conversation or start a new one</p>
+          <h2>欢迎使用 IMClaw</h2>
+          <p>选择一个对话或开始新对话</p>
         </div>
       </div>
 
@@ -56,16 +56,16 @@
           <textarea
             id="prompt-input"
             rows="1"
-            placeholder="Send a message..."
+            placeholder="输入消息..."
             autocomplete="off"
           ></textarea>
-          <button id="send-prompt" class="send-btn" title="Send message">
+          <button id="send-prompt" class="send-btn" title="发送消息">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
           </button>
         </div>
-        <p class="input-hint">Press Enter to send, Shift+Enter for new line</p>
+        <p class="input-hint">按 Enter 发送，Shift+Enter 换行</p>
       </div>
     </main>
   </div>

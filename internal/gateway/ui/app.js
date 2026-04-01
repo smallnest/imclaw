@@ -44,11 +44,11 @@ function formatRelativeTime(value) {
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
 
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days < 7) return `${days}天前`;
+  return date.toLocaleDateString('zh-CN');
 }
 
 function escapeHTML(value = '') {
@@ -76,23 +76,25 @@ function filterStatusMessages(content) {
 
 function setWSStatus(connected) {
   state.wsReady = connected;
-  els.wsStatus.textContent = connected ? 'Live' : 'Offline';
+  els.wsStatus.textContent = connected ? '在线' : '离线';
   els.wsStatus.className = `status-indicator ${connected ? 'live' : 'offline'}`;
 }
 
 // ============ Session List ============
 
 function getSessionTitle(session) {
-  if (session.last_prompt) {
-    return session.last_prompt.slice(0, 50) + (session.last_prompt.length > 50 ? '...' : '');
+  // Use first prompt as title, max 20 characters
+  const title = session.first_prompt || session.last_prompt;
+  if (title) {
+    return title.slice(0, 20) + (title.length > 20 ? '...' : '');
   }
-  return `Chat ${session.id.slice(0, 8)}`;
+  return `对话 ${session.id.slice(0, 8)}`;
 }
 
 function getSessionPreview(session) {
   if (session.last_error) return session.last_error.slice(0, 30);
   if (session.last_output) return session.last_output.slice(0, 30);
-  return 'No messages yet';
+  return '暂无消息';
 }
 
 function renderSessions() {
@@ -104,7 +106,7 @@ function renderSessions() {
   });
 
   if (!items.length) {
-    els.sessionList.innerHTML = '<div class="empty-state">No conversations</div>';
+    els.sessionList.innerHTML = '<div class="empty-state">暂无对话</div>';
     return;
   }
 
@@ -163,7 +165,7 @@ function createThinkingBlock(content) {
   div.className = 'thinking-block collapsible';
   div.innerHTML = `
     <div class="collapsible-header" onclick="toggleCollapse(this)">
-      <span class="label">💭 Thinking</span>
+      <span class="label">💭 思考</span>
       <span class="toggle-icon">▼</span>
     </div>
     <div class="collapsible-content">
@@ -216,7 +218,7 @@ function createErrorBlock(content) {
   const div = document.createElement('div');
   div.className = 'error-block';
   div.innerHTML = `
-    <div class="label">Error</div>
+    <div class="label">错误</div>
     <pre>${escapeHTML(content)}</pre>
   `;
   return div;
@@ -241,7 +243,10 @@ function setOutputContent(content) {
 }
 
 function scrollToBottom() {
-  els.messages.scrollTop = els.messages.scrollHeight;
+  // Use requestAnimationFrame to ensure scroll happens after DOM updates
+  requestAnimationFrame(() => {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  });
 }
 
 function renderMessages() {
@@ -251,8 +256,8 @@ function renderMessages() {
     els.messages.innerHTML = `
       <div class="welcome-screen">
         <div class="welcome-icon">💬</div>
-        <h2>Start a conversation</h2>
-        <p>Send a message to begin</p>
+        <h2>开始对话</h2>
+        <p>发送消息开始对话</p>
       </div>
     `;
     return;
@@ -327,7 +332,7 @@ function renderMessages() {
           break;
 
         case 'error':
-          bubble.appendChild(createErrorBlock(event.content || 'Unknown error'));
+          bubble.appendChild(createErrorBlock(event.content || '未知错误'));
           break;
       }
     } else if (entry.type === 'error') {
@@ -335,7 +340,7 @@ function renderMessages() {
         currentAssistantMessage = createMessageElement('assistant');
       }
       const bubble = currentAssistantMessage.querySelector('.bubble');
-      bubble.appendChild(createErrorBlock(entry.error || 'Unknown error'));
+      bubble.appendChild(createErrorBlock(entry.error || '未知错误'));
     }
   }
 
@@ -357,7 +362,7 @@ async function loadSession(sessionId) {
     history.replaceState({}, '', `/sessions/${encodeURIComponent(sessionId)}`);
 
     // Update header
-    els.sessionTitle.textContent = getSessionTitle(session);
+    els.sessionTitle.textContent = getSessionTitle(session) || '新对话';
     els.sessionMeta.textContent = `${session.agent_name || 'claude'} · ${formatRelativeTime(session.last_active)}`;
 
     // Update agent select
@@ -464,7 +469,7 @@ function connectWS() {
           // Final result
           setOutputContent(filterStatusMessages(activity.content) || '');
         } else if (activity.type === 'error') {
-          appendToCurrentMessage(createErrorBlock(activity.error || 'Unknown error'));
+          appendToCurrentMessage(createErrorBlock(activity.error || '未知错误'));
         }
       }
       return;
@@ -528,7 +533,7 @@ function handleStreamEvent(event) {
       break;
 
     case 'error':
-      appendToCurrentMessage(createErrorBlock(event.content || 'Unknown error'));
+      appendToCurrentMessage(createErrorBlock(event.content || '未知错误'));
       break;
   }
 
