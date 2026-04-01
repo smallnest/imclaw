@@ -617,6 +617,25 @@ func printResponseContent(content string) {
 	fmt.Println(content)
 }
 
+func printCLIError(stderr io.Writer, message string) {
+	fmt.Fprintf(stderr, "Error: %s\n", message)
+
+	if shouldSuggestApproveAll(message) {
+		fmt.Fprintln(stderr, "Hint: this request likely needs tool execution permission. Retry with --approve-all.")
+	}
+}
+
+func shouldSuggestApproveAll(message string) bool {
+	if getPermissions() == "approve-all" {
+		return false
+	}
+
+	message = strings.ToLower(message)
+	return strings.Contains(message, "exit status 5") ||
+		strings.Contains(message, "user refused permission") ||
+		strings.Contains(message, "permission")
+}
+
 // sendAndExit sends a single message and exits
 func sendAndExit(client *Client, message string) {
 	if err := client.Connect(); err != nil {
@@ -647,7 +666,7 @@ func sendAndExit(client *Client, message string) {
 	}
 
 	if resp.Error != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error.Message)
+		printCLIError(os.Stderr, resp.Error.Message)
 		os.Exit(1)
 	}
 
@@ -697,7 +716,7 @@ func startREPL(client *Client) {
 
 	// Show session info
 	if initResp.Error != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", initResp.Error.Message)
+		printCLIError(os.Stderr, initResp.Error.Message)
 	} else if result, ok := initResp.Result.(map[string]interface{}); ok {
 		if sid, ok := result["session_id"].(string); ok {
 			fmt.Printf("Session: %s", sid)
@@ -768,7 +787,7 @@ func startREPL(client *Client) {
 					continue
 				}
 				if resp.Error != nil {
-					fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error.Message)
+					printCLIError(os.Stderr, resp.Error.Message)
 					continue
 				}
 				fmt.Println("New session created. Context cleared.")
@@ -796,7 +815,7 @@ func startREPL(client *Client) {
 			}
 
 			if resp.Error != nil {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error.Message)
+				printCLIError(os.Stderr, resp.Error.Message)
 				continue
 			}
 
@@ -863,7 +882,7 @@ func showSession(client *Client, sessionID string) {
 	}
 
 	if resp.Error != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error.Message)
+		printCLIError(os.Stderr, resp.Error.Message)
 		return
 	}
 

@@ -41,3 +41,36 @@ func TestLooksLikeTranscript(t *testing.T) {
 		t.Fatal("did not expect plain output to be treated as transcript")
 	}
 }
+
+func TestShouldSuggestApproveAll(t *testing.T) {
+	*approveAll = false
+	*approveReads = true
+	*denyAll = false
+
+	if !shouldSuggestApproveAll("Agent error: exit status 5") {
+		t.Fatal("expected approve-all hint for exit status 5")
+	}
+	if !shouldSuggestApproveAll("User refused permission to run tool") {
+		t.Fatal("expected approve-all hint for permission refusal")
+	}
+	if shouldSuggestApproveAll("plain network timeout") {
+		t.Fatal("did not expect approve-all hint for unrelated error")
+	}
+}
+
+func TestPrintCLIErrorIncludesHint(t *testing.T) {
+	*approveAll = false
+	*approveReads = true
+	*denyAll = false
+
+	var stderr bytes.Buffer
+	printCLIError(&stderr, "Agent error: exit status 5")
+
+	got := stderr.String()
+	if !bytes.Contains([]byte(got), []byte("Error: Agent error: exit status 5\n")) {
+		t.Fatalf("missing main error line: %q", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("Retry with --approve-all")) {
+		t.Fatalf("missing approve-all hint: %q", got)
+	}
+}
