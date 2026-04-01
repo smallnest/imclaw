@@ -288,7 +288,6 @@ function renderMessages() {
 
       switch (event.type) {
         case 'thinking_delta':
-        case 'thinking_end':
           let thinkingBlock = bubble.querySelector('.thinking-block');
           const filteredContent = filterStatusMessages(event.content);
           if (!filteredContent) break;
@@ -300,6 +299,10 @@ function renderMessages() {
             const pre = thinkingBlock.querySelector('.collapsible-content pre') || thinkingBlock.querySelector('pre');
             if (pre) pre.textContent += filteredContent;
           }
+          break;
+
+        case 'thinking_end':
+          // Thinking complete - no action needed, content already added via thinking_delta
           break;
 
         case 'tool_start':
@@ -491,7 +494,7 @@ function handleStreamEvent(event) {
       break;
 
     case 'thinking_end':
-      // Thinking complete
+      // Thinking complete - no action needed, content already added via thinking_delta
       break;
 
     case 'tool_start':
