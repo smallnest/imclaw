@@ -477,11 +477,6 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 			return nil, fmt.Errorf("failed to read message: %w", err)
 		}
 
-		// Debug: print raw message if verbose
-		if *verbose {
-			fmt.Fprintf(os.Stderr, "[WS] Received: %s\n", string(msg))
-		}
-
 		// Try to parse as notification first
 		var notification JSONRPCRequest
 		if err := json.Unmarshal(msg, &notification); err == nil {

@@ -427,9 +427,6 @@ function connectWS() {
   state.ws.addEventListener('message', async (raw) => {
     const message = JSON.parse(raw.data);
 
-    // Debug: log all WebSocket messages
-    console.log('[WS] Received:', message);
-
     // RPC response
     if (message.id && state.pending.has(message.id) && !message.method) {
       const pending = state.pending.get(message.id);
