@@ -57,6 +57,23 @@ function escapeHTML(value = '') {
   }[char]));
 }
 
+// Filter out status messages like [acpx] and [client]
+function filterStatusMessages(content) {
+  if (!content) return content;
+  return content
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim();
+      // Skip lines that start with [acpx] or [client]
+      if (trimmed.startsWith('[acpx]') || trimmed.startsWith('[client]')) {
+        return false;
+      }
+      return true;
+    })
+    .join('\n')
+    .trim();
+}
+
 function setWSStatus(connected) {
   state.wsReady = connected;
   els.wsStatus.textContent = connected ? 'Live' : 'Offline';
@@ -139,25 +156,61 @@ function createMessageElement(role, content = '') {
 }
 
 function createThinkingBlock(content) {
+  const filteredContent = filterStatusMessages(content);
+  if (!filteredContent || !filteredContent.trim()) return null;
+
   const div = document.createElement('div');
-  div.className = 'thinking-block';
+  div.className = 'thinking-block collapsible';
   div.innerHTML = `
-    <div class="label">Thinking</div>
-    <pre>${escapeHTML(content)}</pre>
+    <div class="collapsible-header" onclick="toggleCollapse(this)">
+      <span class="label">💭 Thinking</span>
+      <span class="toggle-icon">▼</span>
+    </div>
+    <div class="collapsible-content">
+      <pre>${escapeHTML(filteredContent)}</pre>
+    </div>
   `;
   return div;
 }
 
 function createToolBlock(name, type, content) {
+  // Skip empty tool events (start/end with no content)
+  if ((type === 'start' || type === 'end') && !content) {
+    return null;
+  }
+
   const div = document.createElement('div');
-  div.className = 'tool-block';
+  div.className = 'tool-block collapsible';
+
   const icon = type === 'start' ? '▶' : type === 'end' ? '⏹' : '📄';
+  const hasContent = content && content.trim();
+
   div.innerHTML = `
-    <div class="label"><span class="tool-name">${icon} ${escapeHTML(name)}</span></div>
-    ${content ? `<pre>${escapeHTML(content)}</pre>` : ''}
+    <div class="collapsible-header ${hasContent ? '' : 'no-content'}" ${hasContent ? 'onclick="toggleCollapse(this)"' : ''}>
+      <span class="label"><span class="tool-name">${icon} ${escapeHTML(name)}</span></span>
+      ${hasContent ? '<span class="toggle-icon">▼</span>' : ''}
+    </div>
+    ${hasContent ? `<div class="collapsible-content"><pre>${escapeHTML(content)}</pre></div>` : ''}
   `;
   return div;
 }
+
+// Global function for toggling collapse
+window.toggleCollapse = function(header) {
+  const block = header.parentElement;
+  const content = block.querySelector('.collapsible-content');
+  const icon = header.querySelector('.toggle-icon');
+
+  if (content.style.display === 'none') {
+    content.style.display = 'block';
+    icon.textContent = '▼';
+    block.classList.remove('collapsed');
+  } else {
+    content.style.display = 'none';
+    icon.textContent = '▶';
+    block.classList.add('collapsed');
+  }
+};
 
 function createErrorBlock(content) {
   const div = document.createElement('div');
@@ -224,7 +277,7 @@ function renderMessages() {
         currentAssistantMessage = createMessageElement('assistant');
       }
       const output = currentAssistantMessage.querySelector('.output-content');
-      if (output) output.textContent = entry.content || '';
+      if (output) output.textContent = filterStatusMessages(entry.content) || '';
     } else if (entry.type === 'event' && entry.event) {
       // Events (thinking, tools, errors)
       if (!currentAssistantMessage) {
@@ -237,34 +290,40 @@ function renderMessages() {
         case 'thinking_delta':
         case 'thinking_end':
           let thinkingBlock = bubble.querySelector('.thinking-block');
+          const filteredContent = filterStatusMessages(event.content);
+          if (!filteredContent) break;
+
           if (!thinkingBlock) {
-            thinkingBlock = createThinkingBlock(event.content || '');
-            bubble.insertBefore(thinkingBlock, bubble.firstChild);
+            thinkingBlock = createThinkingBlock(filteredContent);
+            if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.firstChild);
           } else {
-            thinkingBlock.querySelector('pre').textContent += event.content || '';
+            const pre = thinkingBlock.querySelector('.collapsible-content pre') || thinkingBlock.querySelector('pre');
+            if (pre) pre.textContent += filteredContent;
           }
           break;
 
         case 'tool_start':
-          bubble.appendChild(createToolBlock(event.name || 'tool', 'start'));
+          // Skip empty tool_start events
           break;
 
         case 'tool_input':
-          bubble.appendChild(createToolBlock(event.name || 'tool', 'input', event.input));
+          const inputBlock = createToolBlock(event.name || 'tool', 'input', event.input);
+          if (inputBlock) bubble.appendChild(inputBlock);
           break;
 
         case 'tool_output':
-          bubble.appendChild(createToolBlock(event.name || 'tool', 'output', event.output));
+          const outputBlock = createToolBlock(event.name || 'tool', 'output', event.output);
+          if (outputBlock) bubble.appendChild(outputBlock);
           break;
 
         case 'tool_end':
-          bubble.appendChild(createToolBlock(event.name || 'tool', 'end'));
+          // Skip empty tool_end events
           break;
 
         case 'output_delta':
         case 'output_final':
           const output = currentAssistantMessage.querySelector('.output-content');
-          if (output) output.textContent += event.content || '';
+          if (output) output.textContent += filterStatusMessages(event.content) || '';
           break;
 
         case 'error':
@@ -403,7 +462,7 @@ function connectWS() {
           handleStreamEvent(activity.event);
         } else if (activity.type === 'result') {
           // Final result
-          setOutputContent(activity.content || '');
+          setOutputContent(filterStatusMessages(activity.content) || '');
         } else if (activity.type === 'error') {
           appendToCurrentMessage(createErrorBlock(activity.error || 'Unknown error'));
         }
@@ -425,11 +484,15 @@ function handleStreamEvent(event) {
   switch (event.type) {
     case 'thinking_delta':
       let thinkingBlock = bubble.querySelector('.thinking-block');
+      const filteredContent = filterStatusMessages(event.content);
+      if (!filteredContent) break;
+
       if (!thinkingBlock) {
-        thinkingBlock = createThinkingBlock(event.content || '');
-        bubble.insertBefore(thinkingBlock, bubble.querySelector('.output-content') || bubble.firstChild);
+        thinkingBlock = createThinkingBlock(filteredContent);
+        if (thinkingBlock) bubble.insertBefore(thinkingBlock, bubble.querySelector('.output-content') || bubble.firstChild);
       } else {
-        thinkingBlock.querySelector('pre').textContent += event.content || '';
+        const pre = thinkingBlock.querySelector('.collapsible-content pre') || thinkingBlock.querySelector('pre');
+        if (pre) pre.textContent += filteredContent;
       }
       break;
 
@@ -438,28 +501,30 @@ function handleStreamEvent(event) {
       break;
 
     case 'tool_start':
-      bubble.appendChild(createToolBlock(event.name || 'tool', 'start', ''));
+      // Skip empty tool_start events
       break;
 
     case 'tool_input':
-      bubble.appendChild(createToolBlock(event.name || 'tool', 'input', event.input));
+      const inputBlock = createToolBlock(event.name || 'tool', 'input', event.input);
+      if (inputBlock) bubble.appendChild(inputBlock);
       break;
 
     case 'tool_output':
-      bubble.appendChild(createToolBlock(event.name || 'tool', 'output', event.output));
+      const outputBlock = createToolBlock(event.name || 'tool', 'output', event.output);
+      if (outputBlock) bubble.appendChild(outputBlock);
       break;
 
     case 'tool_end':
-      bubble.appendChild(createToolBlock(event.name || 'tool', 'end', ''));
+      // Skip empty tool_end events
       break;
 
     case 'output_delta':
       const output = state.currentMessage.querySelector('.output-content');
-      if (output) output.textContent += event.content || '';
+      if (output) output.textContent += filterStatusMessages(event.content) || '';
       break;
 
     case 'output_final':
-      setOutputContent(event.content || '');
+      setOutputContent(filterStatusMessages(event.content) || '');
       break;
 
     case 'error':
