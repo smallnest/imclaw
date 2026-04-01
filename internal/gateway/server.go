@@ -539,8 +539,8 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		return
 	}
 
-	// Strip ANSI escape sequences from final content
-	finalContent := event.StripANSI(fullContent.String())
+	// Strip ANSI escape sequences and filter transcript markers from final content
+	finalContent := filterTranscriptMarkers(event.StripANSI(fullContent.String()))
 	s.recordResult(sess.ID, req.ID, finalContent)
 	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}})
 }
@@ -661,6 +661,26 @@ func applyStreamChunk(fullContent *strings.Builder, streamErr *string, chunk age
 	case "error":
 		*streamErr = chunk.Content
 	}
+}
+
+// filterTranscriptMarkers removes transcript marker lines like [thinking], [tool], [done], [acpx], [client]
+func filterTranscriptMarkers(content string) string {
+	lines := strings.Split(content, "\n")
+	var filtered []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip marker lines
+		if trimmed == "[thinking]" ||
+			strings.HasPrefix(trimmed, "[thinking] ") ||
+			strings.HasPrefix(trimmed, "[tool]") ||
+			strings.HasPrefix(trimmed, "[done]") ||
+			strings.HasPrefix(trimmed, "[acpx]") ||
+			strings.HasPrefix(trimmed, "[client]") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
 }
 
 func buildStructuredEvents(parser *event.Parser, chunk agent.StreamChunk) []agent.Event {
