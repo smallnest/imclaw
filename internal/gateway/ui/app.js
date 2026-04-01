@@ -57,15 +57,15 @@ function escapeHTML(value = '') {
   }[char]));
 }
 
-// Filter out status messages like [acpx] and [client]
+// Filter out status messages like [acpx], [client], and [done]
 function filterStatusMessages(content) {
   if (!content) return content;
   return content
     .split('\n')
     .filter(line => {
       const trimmed = line.trim();
-      // Skip lines that start with [acpx] or [client]
-      if (trimmed.startsWith('[acpx]') || trimmed.startsWith('[client]')) {
+      // Skip lines that start with [acpx], [client], or [done]
+      if (trimmed.startsWith('[acpx]') || trimmed.startsWith('[client]') || trimmed.startsWith('[done]')) {
         return false;
       }
       return true;
