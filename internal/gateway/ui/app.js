@@ -176,25 +176,20 @@ function createThinkingBlock(content) {
 }
 
 function createToolBlock(name, type, content) {
-  // Skip empty tool events (start/end with no content)
-  if ((type === 'start' || type === 'end') && !content) {
-    return null;
+  // Only show completed tools with a simple inline style
+  if (type === 'completed') {
+    const div = document.createElement('div');
+    div.className = 'tool-block collapsible';
+    div.innerHTML = `
+      <div class="collapsible-header no-content">
+        <span class="label"><span class="tool-name">✓ ${escapeHTML(name)}</span></span>
+      </div>
+    `;
+    return div;
   }
 
-  const div = document.createElement('div');
-  div.className = 'tool-block collapsible';
-
-  const icon = type === 'start' ? '▶' : type === 'end' ? '⏹' : '📄';
-  const hasContent = content && content.trim();
-
-  div.innerHTML = `
-    <div class="collapsible-header ${hasContent ? '' : 'no-content'}" ${hasContent ? 'onclick="toggleCollapse(this)"' : ''}>
-      <span class="label"><span class="tool-name">${icon} ${escapeHTML(name)}</span></span>
-      ${hasContent ? '<span class="toggle-icon">▼</span>' : ''}
-    </div>
-    ${hasContent ? `<div class="collapsible-content"><pre>${escapeHTML(content)}</pre></div>` : ''}
-  `;
-  return div;
+  // Skip other tool events
+  return null;
 }
 
 // Global function for toggling collapse
@@ -308,21 +303,15 @@ function renderMessages() {
           break;
 
         case 'tool_start':
-          // Skip empty tool_start events
-          break;
-
         case 'tool_input':
-          const inputBlock = createToolBlock(event.name || 'tool', 'input', event.input);
-          if (inputBlock) bubble.appendChild(inputBlock);
-          break;
-
         case 'tool_output':
-          const outputBlock = createToolBlock(event.name || 'tool', 'output', event.output);
-          if (outputBlock) bubble.appendChild(outputBlock);
+          // Skip these, only show completed tools
           break;
 
         case 'tool_end':
-          // Skip empty tool_end events
+          // Only show completed tool calls
+          const toolBlock = createToolBlock(event.name || 'tool', 'completed');
+          if (toolBlock) bubble.appendChild(toolBlock);
           break;
 
         case 'output_delta':
@@ -506,21 +495,15 @@ function handleStreamEvent(event) {
       break;
 
     case 'tool_start':
-      // Skip empty tool_start events
-      break;
-
     case 'tool_input':
-      const inputBlock = createToolBlock(event.name || 'tool', 'input', event.input);
-      if (inputBlock) bubble.appendChild(inputBlock);
-      break;
-
     case 'tool_output':
-      const outputBlock = createToolBlock(event.name || 'tool', 'output', event.output);
-      if (outputBlock) bubble.appendChild(outputBlock);
+      // Skip these, only show completed tools
       break;
 
     case 'tool_end':
-      // Skip empty tool_end events
+      // Only show completed tool calls
+      const toolBlock = createToolBlock(event.name || 'tool', 'completed');
+      if (toolBlock) bubble.appendChild(toolBlock);
       break;
 
     case 'output_delta':

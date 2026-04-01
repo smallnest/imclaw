@@ -397,16 +397,20 @@ html, body {
 .tool-block {
   background: var(--tool-bg);
   border-left: 3px solid var(--tool-border);
+  border-radius: 6px;
+  margin-bottom: 6px;
 }
 
 .tool-block .label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--tool-text);
   font-weight: 500;
 }
 
 .tool-block .tool-name {
   color: var(--tool-text);
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
 }
 
 .tool-block .collapsible-content pre {
