@@ -6,34 +6,34 @@
 }
 
 :root {
-  /* ChatGPT Dark Theme Colors */
-  --sidebar-bg: #171717;
-  --sidebar-hover: #212121;
-  --sidebar-active: #2f2f2f;
-  --sidebar-text: #ececec;
-  --sidebar-text-muted: #8e8e8e;
-  --main-bg: #212121;
-  --chat-bg: #212121;
-  --message-user-bg: #2f2f2f;
-  --text-primary: #ececec;
-  --text-secondary: #c5c5c5;
-  --text-muted: #8e8e8e;
+  /* ChatGPT Light Theme Colors */
+  --sidebar-bg: #f9fafb;
+  --sidebar-hover: #ececf1;
+  --sidebar-active: #e5e5e5;
+  --sidebar-text: #374151;
+  --sidebar-text-muted: #6b7280;
+  --main-bg: #ffffff;
+  --chat-bg: #ffffff;
+  --message-user-bg: #f3f4f6;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
   --accent: #10a37f;
-  --accent-hover: #19c37d;
-  --border: #2f2f2f;
-  --error: #f87171;
-  --warning: #fbbf24;
+  --accent-hover: #0d8a6a;
+  --border: #e5e7eb;
+  --error: #ef4444;
+  --warning: #f59e0b;
 
   /* Block Colors */
-  --thinking-bg: #1e1e2e;
-  --thinking-border: #6366f1;
-  --thinking-text: #a5b4fc;
-  --tool-bg: #162016;
+  --thinking-bg: #f0f9ff;
+  --thinking-border: #3b82f6;
+  --thinking-text: #1d4ed8;
+  --tool-bg: #f0fdf4;
   --tool-border: #10a37f;
-  --tool-text: #86efac;
-  --error-bg: #2a1616;
+  --tool-text: #047857;
+  --error-bg: #fef2f2;
   --error-border: #ef4444;
-  --error-text: #fca5a5;
+  --error-text: #dc2626;
 }
 
 html, body {
@@ -220,12 +220,12 @@ html, body {
 }
 
 .status-indicator.live {
-  background: rgba(16, 163, 127, 0.15);
+  background: rgba(16, 163, 127, 0.1);
   color: var(--accent);
 }
 
 .status-indicator.offline {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.1);
   color: var(--error);
 }
 
@@ -348,7 +348,7 @@ html, body {
 }
 
 .collapsible-header:hover {
-  filter: brightness(1.1);
+  filter: brightness(0.98);
 }
 
 .collapsible-header.no-content {
@@ -450,11 +450,12 @@ html, body {
   display: flex;
   align-items: flex-end;
   gap: 12px;
-  background: var(--sidebar-bg);
+  background: var(--main-bg);
   border-radius: 24px;
   padding: 8px 12px;
   border: 1px solid var(--border);
   transition: border-color 0.15s;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.05);
 }
 
 .input-container:focus-within {
@@ -538,7 +539,7 @@ html, body {
 
 /* Code blocks */
 .bubble code {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.05);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
