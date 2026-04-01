@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,7 +37,7 @@ var (
 	cwd = flag.String("cwd", "", "Working directory")
 
 	// Permission flags
-	approveAll   = flag.Bool("approve-all", false, "Auto-approve all permission requests")
+	approveAll   = flag.Bool("approve-all", true, "Auto-approve all permission requests")
 	approveReads = flag.Bool("approve-reads", false, "Auto-approve read/search requests and prompt for writes")
 	denyAll      = flag.Bool("deny-all", false, "Deny all permission requests")
 
@@ -64,9 +65,6 @@ var (
 
 	// JSON strict mode
 	jsonStrict = flag.Bool("json-strict", false, "Strict JSON mode: requires --format json and suppresses non-JSON stderr output")
-
-	// Streaming mode
-	stream = flag.Bool("stream", true, "Enable streaming output (default: true)")
 
 	// Transcript parsing
 	parseTranscript = flag.Bool("parse-transcript", false, "Parse full IMClaw transcript output into structured message slices")
@@ -617,6 +615,34 @@ func printResponseContent(content string) {
 	fmt.Println(content)
 }
 
+func writeParsedMessage(stdout io.Writer, msg transcript.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Fprintf(stdout, "{\"type\":\"output\",\"content\":%q}\n", msg.Content)
+		return
+	}
+	fmt.Fprintln(stdout, string(data))
+}
+
+func startTranscriptStreamWriter(stdout io.Writer) (chan<- string, func()) {
+	chunks := make(chan string, 64)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for msg := range transcript.ParseStream(context.Background(), chunks) {
+			writeParsedMessage(stdout, msg)
+		}
+	}()
+
+	finish := func() {
+		close(chunks)
+		<-done
+	}
+
+	return chunks, finish
+}
+
 func printCLIError(stderr io.Writer, message string) {
 	fmt.Fprintf(stderr, "Error: %s\n", message)
 
@@ -647,18 +673,23 @@ func sendAndExit(client *Client, message string) {
 	var resp *JSONRPCResponse
 	var err error
 
-	if *stream {
-		// Use streaming mode
-		resp, err = client.AskStream(message, func(chunkType, chunk string) {
-			if !*parseTranscript {
-				writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
-			}
-			// "done" type chunks are handled implicitly
-		})
-	} else {
-		// Use non-streaming mode
-		resp, err = client.Ask(message)
+	var transcriptChunks chan<- string
+	var finishTranscript func()
+	if *parseTranscript {
+		transcriptChunks, finishTranscript = startTranscriptStreamWriter(os.Stdout)
+		defer finishTranscript()
 	}
+
+	resp, err = client.AskStream(message, func(chunkType, chunk string) {
+		if *parseTranscript {
+			if chunkType == "content" {
+				transcriptChunks <- chunk
+			}
+		} else {
+			writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+		}
+		// "done" type chunks are handled implicitly
+	})
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -670,22 +701,14 @@ func sendAndExit(client *Client, message string) {
 		os.Exit(1)
 	}
 
-	// In streaming mode, content is already printed via callback
-	// Just print final result in non-streaming mode or if there's additional data
-	if !*stream {
+	// In normal mode, content is already printed via callback.
+	// For transcript parsing, only print the final content when it was not a transcript.
+	if *parseTranscript {
 		if result, ok := resp.Result.(map[string]interface{}); ok {
 			if content, ok := result["content"].(string); ok {
-				printResponseContent(content)
-			} else {
-				printJSON(result)
-			}
-		} else {
-			printJSON(resp.Result)
-		}
-	} else if *parseTranscript {
-		if result, ok := resp.Result.(map[string]interface{}); ok {
-			if content, ok := result["content"].(string); ok {
-				printResponseContent(content)
+				if !looksLikeTranscript(content) {
+					printResponseContent(content)
+				}
 			} else {
 				printJSON(result)
 			}
@@ -798,15 +821,24 @@ func startREPL(client *Client) {
 			var resp *JSONRPCResponse
 			var err error
 
-			if *stream {
-				fmt.Println()
-				resp, err = client.AskStream(line, func(chunkType, chunk string) {
-					if !*parseTranscript {
-						writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+			fmt.Println()
+			var transcriptChunks chan<- string
+			var finishTranscript func()
+			if *parseTranscript {
+				transcriptChunks, finishTranscript = startTranscriptStreamWriter(os.Stdout)
+			}
+
+			resp, err = client.AskStream(line, func(chunkType, chunk string) {
+				if *parseTranscript {
+					if chunkType == "content" {
+						transcriptChunks <- chunk
 					}
-				})
-			} else {
-				resp, err = client.Ask(line)
+				} else {
+					writeStreamChunk(os.Stdout, os.Stderr, chunkType, chunk)
+				}
+			})
+			if finishTranscript != nil {
+				finishTranscript()
 			}
 
 			if err != nil {
@@ -819,23 +851,13 @@ func startREPL(client *Client) {
 				continue
 			}
 
-			// Print response (in non-streaming mode or for additional data)
-			if !*stream {
+			if *parseTranscript {
 				fmt.Println()
 				if result, ok := resp.Result.(map[string]interface{}); ok {
 					if content, ok := result["content"].(string); ok {
-						printResponseContent(content)
-					} else {
-						printJSON(result)
-					}
-				} else {
-					printJSON(resp.Result)
-				}
-			} else if *parseTranscript {
-				fmt.Println()
-				if result, ok := resp.Result.(map[string]interface{}); ok {
-					if content, ok := result["content"].(string); ok {
-						printResponseContent(content)
+						if !looksLikeTranscript(content) {
+							printResponseContent(content)
+						}
 					} else {
 						printJSON(result)
 					}

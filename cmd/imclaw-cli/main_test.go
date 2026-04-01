@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"testing"
+
+	"github.com/smallnest/imclaw/internal/transcript"
 )
 
 func TestWriteStreamChunkWritesContentWithoutExtraNewline(t *testing.T) {
@@ -72,5 +74,18 @@ func TestPrintCLIErrorIncludesHint(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(got), []byte("Retry with --approve-all")) {
 		t.Fatalf("missing approve-all hint: %q", got)
+	}
+}
+
+func TestWriteParsedMessageOutputsJSONLine(t *testing.T) {
+	var stdout bytes.Buffer
+
+	writeParsedMessage(&stdout, transcript.Message{
+		Type:    transcript.MessageThinking,
+		Content: "hello",
+	})
+
+	if got := stdout.String(); got != "{\"type\":\"thinking\",\"content\":\"hello\"}\n" {
+		t.Fatalf("unexpected parsed message output: %q", got)
 	}
 }

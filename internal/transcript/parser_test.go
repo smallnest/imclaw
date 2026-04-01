@@ -1,6 +1,9 @@
 package transcript
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseFullTranscript(t *testing.T) {
 	raw := `[acpx] session 78f133c0-862e-4ded-a22b-069338116f20 (8b2caf0c-dfe9-40c1-b718-700de1704a88) · /Users/chaoyuepan/ai/imclaw · agent needs reconnect
@@ -81,5 +84,51 @@ func TestParseIgnoresStatusOnlyTranscript(t *testing.T) {
 	got := Parse(raw)
 	if len(got) != 0 {
 		t.Fatalf("expected no messages, got %#v", got)
+	}
+}
+
+func TestFeedParsesIncrementallyAcrossChunks(t *testing.T) {
+	p := NewParser()
+
+	var got []Message
+	got = append(got, p.Feed("[thinking] hel")...)
+	got = append(got, p.Feed("lo\nworld\n")...)
+
+	if len(got) != 1 {
+		t.Fatalf("expected one completed message before flush, got %#v", got)
+	}
+	if got[0].Type != MessageThinking || got[0].Content != "hello" {
+		t.Fatalf("unexpected incremental message: %#v", got[0])
+	}
+
+	got = append(got, p.Flush()...)
+	if len(got) != 2 {
+		t.Fatalf("expected two messages after flush, got %#v", got)
+	}
+	if got[1].Type != MessageOutput || got[1].Content != "world" {
+		t.Fatalf("unexpected flushed output message: %#v", got[1])
+	}
+}
+
+func TestParseStreamClosesAfterFlush(t *testing.T) {
+	ctx := context.Background()
+	chunks := make(chan string, 2)
+	chunks <- "[thinking] hello\n"
+	chunks <- "world"
+	close(chunks)
+
+	var got []Message
+	for msg := range ParseStream(ctx, chunks) {
+		got = append(got, msg)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %#v", got)
+	}
+	if got[0].Type != MessageThinking || got[0].Content != "hello" {
+		t.Fatalf("unexpected first streamed message: %#v", got[0])
+	}
+	if got[1].Type != MessageOutput || got[1].Content != "world" {
+		t.Fatalf("unexpected second streamed message: %#v", got[1])
 	}
 }
