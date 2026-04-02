@@ -585,7 +585,7 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, policy *p
 		// Ensure process is killed on exit
 		defer func() {
 			if cmd.Process != nil && cmd.ProcessState == nil {
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 			}
 		}()
 

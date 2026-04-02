@@ -78,9 +78,6 @@ var (
 	timeout = flag.Int("timeout", 0, "Maximum time to wait for agent response (seconds)")
 	ttl     = flag.Int("ttl", 0, "Queue owner idle TTL before shutdown (seconds)")
 
-	// Verbose
-	verbose = flag.Bool("verbose", false, "Enable verbose debug logs")
-
 	// Version
 	showVersion = flag.BoolP("version", "v", false, "Show version information")
 
@@ -481,7 +478,7 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 	}
 
 	// Clear read deadline
-	c.conn.SetReadDeadline(time.Time{})
+	_ = c.conn.SetReadDeadline(time.Time{})
 
 	return &finalResp, nil
 }
