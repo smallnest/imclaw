@@ -570,18 +570,18 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		}
 	}
 
-		if !sawNativeEvents {
-			for _, evt := range flushStructuredEvents(parser, streamErr == "") {
-				if evt.Type == agent.TypeError {
-					sawErrorEvent = true
-				}
-				if evt.Type == agent.TypeOutputFinal {
-					finalOutput = evt.Content
-					sawFinalOutput = true
-				}
-				s.recordEvent(sess.ID, req.ID, evt)
-				if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
-					log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+	if !sawNativeEvents {
+		for _, evt := range flushStructuredEvents(parser, streamErr == "") {
+			if evt.Type == agent.TypeError {
+				sawErrorEvent = true
+			}
+			if evt.Type == agent.TypeOutputFinal {
+				finalOutput = evt.Content
+				sawFinalOutput = true
+			}
+			s.recordEvent(sess.ID, req.ID, evt)
+			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
 				cancel()
 				return
 			}
@@ -861,7 +861,9 @@ func parsePromptOptions(params map[string]interface{}) *agent.PromptOptions {
 		NonInteractivePerms: getStringParam(params, "non_interactive_permissions"),
 		SuppressReads:       getBoolParam(params, "suppress_reads"),
 		Model:               getStringParam(params, "model"),
+		PermissionPreset:    getStringParam(params, "permission_preset"),
 		AllowedTools:        getStringParam(params, "allowed_tools"),
+		DeniedTools:         getStringParam(params, "denied_tools"),
 		MaxTurns:            getIntParam(params, "max_turns"),
 		PromptRetries:       getIntParam(params, "prompt_retries"),
 		Timeout:             getIntParam(params, "timeout"),
