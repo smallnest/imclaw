@@ -1,0 +1,1219 @@
+[acpx] session cwd (019d47ad-ea2d-72a3-b397-69794f4105fd) · /Users/chaoyuepan/ai/imclaw · agent connected
+我先按审核意见核对 `ensureAgentSession`、channel 处理和测试缺口，确认哪些是实际 bug，哪些是设计取舍，再直接修代码和测试。
+
+[tool] Search ensureAgentSession|\"cli\"|handleSessionDetailAPI|handleSessionUpdate|RecordPrompt|Get\( in server.go (running)
+  input: {"call_id":"call_PnCKnmdWMTzhrkRZ04OCnXEX","process_id":"35103","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n \"ensureAgentSession|\\\"cli\\\"|handleSessionDetailAPI|handleSession...
+
+[tool] Search ensureAgentSession|\"cli\"|handleSessionDetailAPI|handleSessionUpdate|RecordPrompt|Get\( in server.go (completed)
+  kind: search
+  input: {"call_id":"call_PnCKnmdWMTzhrkRZ04OCnXEX","process_id":"35103","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n \"ensureAgentSession|\\\"cli\\\"|handleSessionDetailAPI|handleSession...
+  output:
+    internal/session/session.go:238:func (m *Manager) Get(channel, chatID string) (*Session, bool) {
+    internal/session/session.go:315:// RecordPrompt appends a prompt activity to the session timeline.
+    internal/session/session.go:316:func (m *Manager) RecordPrompt(channel, chatID, requestID, prompt string) (*Session, bool) {
+    internal/gateway/server.go:95:	mux.HandleFunc("/api/sessions/", s.handleSessionDetailAPI)
+    internal/gateway/server.go:169:func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
+    internal/gateway/server.go:181:	sess, ok := s.sessionMgr.Get("cli", sessionID)
+    internal/gateway/server.go:265:	auth := r.Header.Get("Authorization")
+    internal/gateway/server.go:273:	token := r.URL.Query().Get("token")
+    internal/gateway/server.go:275:		auth := r.Header.Get("Authorization")
+    internal/gateway/server.go:329:		return s.handleSessionGet(connID, req)
+    internal/gateway/server.go:333:		return s.handleSessionUpdate(connID, req)
+    internal/gateway/server.go:358:		sess := s.sessionMgr.GetOrCreate("cli", "", sessionID, newAgent)
+    internal/gateway/server.go:365:		created := s.sessionMgr.Create("cli", "", uuid.NewString(), agentType)
+    internal/gateway/server.go:375:	agentSessionID, err := s.ensureAgentSession(sess, ag, req.ID)
+    internal/gateway/server.go:409:	agentSessionID, err := s.ensureAgentSession(sess, ag, req.ID)
+    internal/gateway/server.go:482:	sess := s.sessionMgr.GetOrCreate("cli", "", sessionID, agentType)
+    internal/gateway/server.go:486:		sess, _ = s.sessionMgr.Get("cli", sessionID)
+    internal/gateway/server.go:492:func (s *Server) ensureAgentSession(sess *session.Session, ag agent.Agent, requestID string) (string, error) {
+    internal/gateway/server.go:504:	updated, _ := s.sessionMgr.Get("cli", sess.ID)
+    internal/gateway/server.go:517:	if sess, ok := s.sessionMgr.RecordPrompt("cli", sessionID, requestID, prompt); ok {
+    internal/gateway/server.go:524:	if sess, ok := s.sessionMgr.RecordEvent("cli", sessionID, requestID, evt); ok {
+    internal/gateway/server...
+
+[tool] Read server_ui_test.go (running)
+  input: {"call_id":"call_J60wYjhvKtV7llTEOGQRyO1Y","process_id":"80558","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '1,260p' internal/gateway/server_ui_test.go"],"cwd":"/Users/chaoyuep...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go
+
+[tool] Read session.go (running)
+  input: {"call_id":"call_iARzw8uOycce7qNt96qxNgNS","process_id":"6430","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '1,260p' internal/session/session.go"],"cwd":"/Users/chaoyuepan/ai/im...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_1IIy6oeGff4CHUmSrw9vzKfP","process_id":"71377","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '320,620p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server_ui_test.go (completed)
+  kind: read
+  input: {"call_id":"call_J60wYjhvKtV7llTEOGQRyO1Y","process_id":"80558","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '1,260p' internal/gateway/server_ui_test.go"],"cwd":"/Users/chaoyuep...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go
+  output:
+    package gateway
+    
+    import (
+    	"encoding/json"
+    	"net/http"
+    	"net/http/httptest"
+    	"testing"
+    
+    	"github.com/smallnest/imclaw/internal/agent"
+    	"github.com/smallnest/imclaw/internal/session"
+    )
+    
+    func TestSessionsAPIAndDetailIncludePersistedActivity(t *testing.T) {
+    	sessionMgr := session.NewManager()
+    	agentMgr := agent.NewManager()
+    	srv := NewServer(&Config{}, sessionMgr, agentMgr)
+    
+    	sess := sessionMgr.Create("cli", "", "sess-1", "claude")
+    	if _, ok := sessionMgr.RecordPrompt("cli", sess.ID, "req-1", "hello"); !ok {
+    		t.Fatal("expected prompt to be recorded")
+    	}
+    	if _, ok := sessionMgr.RecordResult("cli", sess.ID, "req-1", "world"); !ok {
+    		t.Fatal("expected result to be recorded")
+    	}
+    
+    	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+    	listRec := httptest.NewRecorder()
+    	srv.handleSessionsAPI(listRec, listReq)
+    ... (82 more lines)
+
+[tool] Read session.go (completed)
+  kind: read
+  input: {"call_id":"call_iARzw8uOycce7qNt96qxNgNS","process_id":"6430","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '1,260p' internal/session/session.go"],"cwd":"/Users/chaoyuepan/ai/im...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+  output:
+    package session
+    
+    import (
+    	"sort"
+    	"sync"
+    	"time"
+    
+    	"github.com/smallnest/imclaw/internal/agent"
+    )
+    
+    // ActivityType identifies the type of a persisted session activity.
+    type ActivityType string
+    
+    const (
+    	// ActivityPrompt records a user prompt submitted to a session.
+    	ActivityPrompt ActivityType = "prompt"
+    	// ActivityEvent records a structured streaming event emitted by the agent.
+    	ActivityEvent ActivityType = "event"
+    	// ActivityResult records the final assistant output for a request.
+    	ActivityResult ActivityType = "result"
+    	// ActivityError records an error associated with a request.
+    	ActivityError ActivityType = "error"
+    )
+    
+    // Activity captures a prompt, event, result, or error in a session timeline.
+    type Activity struct {
+    	ID        int64        `json:"id"`
+    	Type      ActivityType `json:"type"`
+    ... (232 more lines)
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_1IIy6oeGff4CHUmSrw9vzKfP","process_id":"71377","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '320,620p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    case "ask":
+    		return s.handleAsk(connID, req)
+    	case "ask_stream":
+    		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "ask_stream requires WebSocket connection"}}
+    	case "session.init":
+    		return s.handleSessionInit(connID, req)
+    	case "session.new":
+    		return s.handleSessionNew(connID, req)
+    	case "session.get":
+    		return s.handleSessionGet(connID, req)
+    	case "session.list":
+    		return s.handleSessionList(connID, req)
+    	case "session.update":
+    		return s.handleSessionUpdate(connID, req)
+    	case "session.delete":
+    		return s.handleSessionDelete(connID, req)
+    	case "agents.list":
+    		return s.handleAgentsList(connID, req)
+    	default:
+    		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "Method not found"}}
+    	}
+    }
+    
+    func (s *Server) handleAsk(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+    	params, ok := req.Params.(map[string]interface{})
+    	if !ok {
+    		return invalidParams(req.ID)
+    	}
+    ... (273 more lines)
+我在核对 `agent` 层的 session 语义。审核里提到的 `AgentSession=id` 可能不是 bug，如果 ACPX 后续 prompt 实际上要求传 session name 而不是返回的内部 id，那需要保留现状但把代码解释清楚并加测试。与此同时，我会把 `cli` 硬编码收敛成常量/解析函数，并补 session 错误路径测试。
+
+[tool] Search EnsureSession|AgentSession|session name|use the name|PromptWithOptions|PromptStream\( in agent.go (running)
+  input: {"call_id":"call_Yi0cOUeedujaYV7hNBaf0ipG","process_id":"81913","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n \"EnsureSession|AgentSession|session name|use the name|PromptWithOpti...
+
+[tool] Search EnsureSession|AgentSession|session name|use the name|PromptWithOptions|PromptStream\( in agent.go (completed)
+  kind: search
+  input: {"call_id":"call_Yi0cOUeedujaYV7hNBaf0ipG","process_id":"81913","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n \"EnsureSession|AgentSession|session name|use the name|PromptWithOpti...
+  output:
+    internal/gateway/server.go:375:	agentSessionID, err := s.ensureAgentSession(sess, ag, req.ID)
+    internal/gateway/server.go:380:	response, err := ag.PromptWithOptions(context.Background(), agentSessionID, content, opts)
+    internal/gateway/server.go:409:	agentSessionID, err := s.ensureAgentSession(sess, ag, req.ID)
+    internal/gateway/server.go:418:	stream, err := ag.PromptStream(ctx, agentSessionID, content, opts)
+    internal/gateway/server.go:492:func (s *Server) ensureAgentSession(sess *session.Session, ag agent.Agent, requestID string) (string, error) {
+    internal/gateway/server.go:493:	agentSessionID := sess.AgentSession
+    internal/gateway/server.go:498:	id, err := ag.EnsureSession(context.Background(), sess.ID)
+    internal/gateway/server.go:502:	sess.AgentSession = sess.ID
+    internal/agent/agent.go:69:	// EnsureSession ensures a session exists
+    internal/agent/agent.go:70:	EnsureSession(ctx context.Context, sessionName string) (string, error)
+    internal/agent/agent.go:75:	// PromptWithOptions sends a prompt with options
+    internal/agent/agent.go:76:	PromptWithOptions(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (string, error)
+    internal/agent/agent.go:79:	PromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error)
+    internal/agent/agent.go:294:	log.Printf("[acpx] No sessionId in output, using session name: %s", sessionName)
+    internal/agent/agent.go:298:// EnsureSession ensures a session exists
+    internal/agent/agent.go:299:func (a *ACPXAgent) EnsureSession(ctx context.Context, sessionName string) (string, error) {
+    internal/agent/agent.go:332:		// Format: [acpx] created session name (id)
+    internal/agent/agent.go:356:	// If no session ID found, return the session name
+    internal/agent/agent.go:357:	log.Printf("[acpx] No sessionId in output, using session name: %s", sessionName)
+    internal/agent/agent.go:384:	return a.PromptWithOptions(ctx, sessionID, prompt, &PromptOptions{
+    internal/agent/agent.go:389:// PromptWithOptions sen...
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_xScrjHwL7SfMpc9RCweLI24B","process_id":"12766","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '620,780p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read agent.go (running)
+  input: {"call_id":"call_bYWirdLuLS8lcsCMlKPU0TuF","process_id":"28999","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '360,620p' internal/agent/agent.go"],"cwd":"/Users/chaoyuepan/ai/imc...
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent.go
+
+[tool] Read agent.go (running)
+  input: {"call_id":"call_NgZQ7f0iqG2ayFAJxTyEPZ5f","process_id":"36898","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '220,360p' internal/agent/agent.go"],"cwd":"/Users/chaoyuepan/ai/imc...
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent.go
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_xScrjHwL7SfMpc9RCweLI24B","process_id":"12766","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '620,780p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    var events []agent.Event
+    	for _, evt := range legacy {
+    		switch evt.Type {
+    		case event.TypeThinking:
+    			events = append(events,
+    				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingStart},
+    				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingDelta, Content: evt.Content},
+    				agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeThinkingEnd, Content: evt.Content},
+    			)
+    		case event.TypeToolStart:
+    			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolStart, Name: evt.Name})
+    		case event.TypeToolInput:
+    			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolInput, Name: evt.Name, Input: evt.Input})
+    		case event.TypeToolEnd:
+    			if evt.Input != "" {
+    				events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolInput, Name: evt.Name, Input: evt.Input})
+    			}
+    			if evt.Output != "" {
+    				events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolOutput, Name: evt.Name, Output: evt.Output})
+    			}
+    			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolEnd, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+    		case event.TypeToolError, event.TypeError:
+    			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeError, Content: evt.Content, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+    		case event.TypeOutput:
+    			events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeOutputFinal, Content: evt.Content})
+    		}
+    	}
+    	return events
+    ... (133 more lines)
+
+[tool] Read agent.go (completed)
+  kind: read
+  input: {"call_id":"call_NgZQ7f0iqG2ayFAJxTyEPZ5f","process_id":"36898","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '220,360p' internal/agent/agent.go"],"cwd":"/Users/chaoyuepan/ai/imc...
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent.go
+  output:
+    // NewACPXAgent creates a new acpx agent
+    func NewACPXAgent(cfg AgentConfig) *ACPXAgent {
+    	return &ACPXAgent{
+    		name:      cfg.Name,
+    		agentType: cfg.Type,
+    		command:   cfg.Command,
+    	}
+    }
+    
+    // Name returns the agent name
+    func (a *ACPXAgent) Name() string {
+    	return a.name
+    }
+    
+    // Type returns the agent type
+    func (a *ACPXAgent) Type() string {
+    	return a.agentType
+    }
+    
+    // CreateSession creates a new agent session
+    func (a *ACPXAgent) CreateSession(ctx context.Context, sessionName string) (string, error) {
+    	args := []string{a.agentType, "sessions", "new", "--name", sessionName}
+    	log.Printf("[acpx] Creating session: %s", sessionName)
+    
+    	output, err := a.runCommandRaw(ctx, 300, args...)
+    	if err != nil {
+    		return "", err
+    	}
+    ... (112 more lines)
+
+[tool] Read agent.go (completed)
+  kind: read
+  input: {"call_id":"call_bYWirdLuLS8lcsCMlKPU0TuF","process_id":"28999","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '360,620p' internal/agent/agent.go"],"cwd":"/Users/chaoyuepan/ai/imc...
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent.go
+  output:
+    // runCommandRaw executes command and returns raw output without post-processing
+    func (a *ACPXAgent) runCommandRaw(ctx context.Context, timeout int, args ...string) (string, error) {
+    	if timeout == 0 {
+    		timeout = 300
+    	}
+    
+    	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+    	defer cancel()
+    
+    	fullCmd := fmt.Sprintf("%s %s", a.command, strings.Join(args, " "))
+    	log.Printf("[acpx] Executing: %s", fullCmd)
+    
+    	cmd := exec.CommandContext(ctx, a.command, args...)
+    	output, err := cmd.CombinedOutput()
+    	if err != nil {
+    		return "", fmt.Errorf("command failed: %v, output: %s", err, string(output))
+    	}
+    
+    	return string(output), nil
+    }
+    
+    // Prompt sends a prompt to the agent
+    func (a *ACPXAgent) Prompt(ctx context.Context, sessionID, prompt string) (string, error) {
+    	return a.PromptWithOptions(ctx, sessionID, prompt, &PromptOptions{
+    		Format: "text",
+    	})
+    }
+    
+    ... (232 more lines)
+我会做三件事：一是把 ACPX 返回的内部 session id 单独存下来，消除 `AgentSession` 语义混淆；二是把 channel 收敛到统一 helper，而不是散落的字符串字面量；三是补上 `session.update` / detail API 的错误路径测试。
+
+[client] fs/read_text_file (running)
+
+[client] fs/read_text_file (running)
+
+[tool] Edit /Users/chaoyuepan/ai/imclaw/internal/session/session.go (running)
+  input: {"call_id":"call_0P3cArROh4tNOt68vfAc3mUf","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","auto_approved":true,"changes":{"/Users/chaoyuepan/ai/imclaw/internal/session/session.go":{"type":"update","unified_diff":"@@...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+
+[client] fs/write_text_file (running)
+
+[error] RUNTIME: Internal error
+
+[tool] Edit /Users/chaoyuepan/ai/imclaw/internal/session/session.go (failed)
+  kind: edit
+  input: {"call_id":"call_0P3cArROh4tNOt68vfAc3mUf","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","auto_approved":true,"changes":{"/Users/chaoyuepan/ai/imclaw/internal/session/session.go":{"type":"update","unified_diff":"@@...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+  output:
+    Failed to write file internal/session/session.go
+    
+    diff /Users/chaoyuepan/ai/imclaw/internal/session/session.go (+1 lines)
+`apply_patch` 仍然不可用，我改成直接写文件继续修，改动会控制在最小范围。
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/session/session.go')
+text = path.read_text()
+text = text.replace('''\tAgentName    string                 `json:"agent_name"`
+\tAgentSession string                 `json:"agent_session"` // acpx session ID
+\tCreatedAt    time.Time              `json:"created_at"`
+''', '''\tAgentName      string                 `json:"agent_name"`
+\tAgentSession   string                 `json:"agent_session"`    // session handle used for subsequent prompts
+\tAgentSessionID string                 `json:"agent_session_id"` // ACPX internal session ID, when available
+\tCreatedAt      time.Time              `json:"created_at"`
+''')
+path.write_text(text)
+PY (running)
+  input: {"call_id":"call_EsLsj494j1xoQjVQMz7mInhJ","process_id":"80252","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/session/s...
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/session/session.go')
+text = path.read_text()
+text = text.replace('''\tAgentName    string                 `json:"agent_name"`
+\tAgentSession string                 `json:"agent_session"` // acpx session ID
+\tCreatedAt    time.Time              `json:"created_at"`
+''', '''\tAgentName      string                 `json:"agent_name"`
+\tAgentSession   string                 `json:"agent_session"`    // session handle used for subsequent prompts
+\tAgentSessionID string                 `json:"agent_session_id"` // ACPX internal session ID, when available
+\tCreatedAt      time.Time              `json:"created_at"`
+''')
+path.write_text(text)
+PY (completed)
+  kind: execute
+  input: {"call_id":"call_EsLsj494j1xoQjVQMz7mInhJ","process_id":"80252","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/session/s...
+  output:
+    {
+      "call_id": "call_EsLsj494j1xoQjVQMz7mInhJ",
+      "process_id": "80252",
+      "turn_id": "019d47bd-89f5-7bd3-964d-573a81d3cccb",
+      "command": [
+        "/bin/zsh",
+        "-lc",
+        "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/session/session.go')\ntext = path.read_text()\ntext = text.replace('''\\tAgentName    string                 `json:\"agent_name\"`\n\\tAgentSession string                 `json:\"agent_session\"` // acpx session ID\n\\tCreatedAt    time.Time              `json:\"created_at\"`\n''', '''\\tAgentName      string                 `json:\"agent_name\"`\n\\tAgentSession   string                 `json:\"agent_session\"`    // session handle used for subsequent prompts\n\\tAgentSessionID string                 `json:\"agent_session_id\"` // ACPX internal session ID, when available\n\\tCreatedAt      time.Time              `json:\"created_at\"`\n''')\npath.write_text(text)\nPY"
+      ],
+      "cwd": "/Users/chaoyuepan/ai/imclaw",
+      "parsed_cmd": [
+        {
+          "type": "unknown",
+          "cmd": "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/session/session.go')\ntext = path.read_text()\ntext = text.replace('''\\tAgentName    string                 `json:\"agent_name\"`\n\\tAgentSession string                 `json:\"agent_session\"` // acpx session ID\n\\tCreatedAt    time.Time              `json:\"created_at\"`\n''', '''\\tAgentName      string                 `json:\"agent_name\"`\n\\tAgentSession   string                 `json:\"agent_session\"`    // session handle used for subsequent prompts\n\\tAgentSessionID string                 `json:\"agent_session_id\"` // ACPX internal session ID, when available\n\\tCreatedAt      time.Time              `json:\"created_at\"`\n''')\npath.write_text(text)\nPY"
+        }
+      ],
+      "source": "unified_exec_startup",
+      "stdout": "",
+      "stderr": "",
+      "aggregated_output": "",
+      "exit_code": 0,
+      "duration": {
+        "secs": 0,
+        "nanos": 1417
+      },
+      "formatted_output": "",
+      "status": "completed"
+    }
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+insert = '''const defaultSessionChannel = "cli"
+
+'''
+marker = '// StreamEvent represents a structured event in the stream.\n'
+if insert not in text:
+    text = text.replace(marker, insert + marker)
+text = text.replace('''func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
+''', '''func sessionChannelFromRequest(r *http.Request) string {
+\tif channel := r.URL.Query().Get("channel"); channel != "" {
+\t\treturn channel
+\t}
+\treturn defaultSessionChannel
+}
+
+func sessionChannelFromParams(params map[string]interface{}) string {
+\tif params != nil {
+\t\tif channel := getStringParam(params, "channel"); channel != "" {
+\t\t\treturn channel
+\t\t}
+\t}
+\treturn defaultSessionChannel
+}
+
+func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
+''')
+repls = {
+    's.sessionMgr.Get("cli", sessionID)': 's.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)',
+    's.sessionMgr.GetOrCreate("cli", "", sessionID, newAgent)': 's.sessionMgr.GetOrCreate(defaultSessionChannel, "", sessionID, newAgent)',
+    's.sessionMgr.Create("cli", "", uuid.NewString(), agentType)': 's.sessionMgr.Create(defaultSessionChannel, "", uuid.NewString(), agentType)',
+    'sess := s.sessionMgr.GetOrCreate("cli", "", sessionID, agentType)': 'sess := s.sessionMgr.GetOrCreate(defaultSessionChannel, "", sessionID, agentType)',
+    'sess, _ = s.sessionMgr.Get("cli", sessionID)': 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)',
+    'updated, _ := s.sessionMgr.Get("cli", sess.ID)': 'updated, _ := s.sessionMgr.Get(defaultSessionChannel, sess.ID)',
+    's.sessionMgr.RecordPrompt("cli", sessionID, requestID, prompt)': 's.sessionMgr.RecordPrompt(defaultSessionChannel, sessionID, requestID, prompt)',
+    's.sessionMgr.RecordEvent("cli", sessionID, requestID, evt)': 's.sessionMgr.RecordEvent(defaultSessionChannel, sessionID, requestID, evt)',
+    's.sessionMgr.RecordResult("cli", sessionID, requestID, content)': 's.sessionMgr.RecordResult(defaultSessionChannel, sessionID, requestID, content)',
+    's.sessionMgr.RecordError("cli", sessionID, requestID, message)': 's.sessionMgr.RecordError(defaultSessionChannel, sessionID, requestID, message)',
+    'created := s.sessionMgr.Create("cli", "", sessionID, agentType)': 'created := s.sessionMgr.Create(sessionChannelFromParams(params), "", sessionID, agentType)',
+    'sess, ok := s.sessionMgr.Get("cli", sessionID)': 'sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)',
+    's.sessionMgr.Delete("cli", sessionID)': 's.sessionMgr.Delete(sessionChannelFromParams(params), sessionID)',
+}
+for old, new in repls.items():
+    text = text.replace(old, new)
+text = text.replace('''	id, err := ag.EnsureSession(context.Background(), sess.ID)
+	if err != nil {
+		return "", err
+	}
+	sess.AgentSession = sess.ID
+	s.sessionMgr.Update(sess)
+''', '''	id, err := ag.EnsureSession(context.Background(), sess.ID)
+	if err != nil {
+		return "", err
+	}
+	// ACPX prompts are addressed by the stable session name we chose (`sess.ID`).
+	// Preserve the returned internal ID separately for observability.
+	sess.AgentSession = sess.ID
+	sess.AgentSessionID = id
+	s.sessionMgr.Update(sess)
+''')
+path.write_text(text)
+PY (running)
+  input: {"call_id":"call_0vRjn4pg42X7vXA716pBuN8g","process_id":"27748","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+insert = '''const defaultSessionChannel = "cli"
+
+'''
+marker = '// StreamEvent represents a structured event in the stream.\n'
+if insert not in text:
+    text = text.replace(marker, insert + marker)
+text = text.replace('''func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
+''', '''func sessionChannelFromRequest(r *http.Request) string {
+\tif channel := r.URL.Query().Get("channel"); channel != "" {
+\t\treturn channel
+\t}
+\treturn defaultSessionChannel
+}
+
+func sessionChannelFromParams(params map[string]interface{}) string {
+\tif params != nil {
+\t\tif channel := getStringParam(params, "channel"); channel != "" {
+\t\t\treturn channel
+\t\t}
+\t}
+\treturn defaultSessionChannel
+}
+
+func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
+''')
+repls = {
+    's.sessionMgr.Get("cli", sessionID)': 's.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)',
+    's.sessionMgr.GetOrCreate("cli", "", sessionID, newAgent)': 's.sessionMgr.GetOrCreate(defaultSessionChannel, "", sessionID, newAgent)',
+    's.sessionMgr.Create("cli", "", uuid.NewString(), agentType)': 's.sessionMgr.Create(defaultSessionChannel, "", uuid.NewString(), agentType)',
+    'sess := s.sessionMgr.GetOrCreate("cli", "", sessionID, agentType)': 'sess := s.sessionMgr.GetOrCreate(defaultSessionChannel, "", sessionID, agentType)',
+    'sess, _ = s.sessionMgr.Get("cli", sessionID)': 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)',
+    'updated, _ := s.sessionMgr.Get("cli", sess.ID)': 'updated, _ := s.sessionMgr.Get(defaultSessionChannel, sess.ID)',
+    's.sessionMgr.RecordPrompt("cli", sessionID, requestID, prompt)': 's.sessionMgr.RecordPrompt(defaultSessionChannel, sessionID, requestID, prompt)',
+    's.sessionMgr.RecordEvent("cli", sessionID, requestID, evt)': 's.sessionMgr.RecordEvent(defaultSessionChannel, sessionID, requestID, evt)',
+    's.sessionMgr.RecordResult("cli", sessionID, requestID, content)': 's.sessionMgr.RecordResult(defaultSessionChannel, sessionID, requestID, content)',
+    's.sessionMgr.RecordError("cli", sessionID, requestID, message)': 's.sessionMgr.RecordError(defaultSessionChannel, sessionID, requestID, message)',
+    'created := s.sessionMgr.Create("cli", "", sessionID, agentType)': 'created := s.sessionMgr.Create(sessionChannelFromParams(params), "", sessionID, agentType)',
+    'sess, ok := s.sessionMgr.Get("cli", sessionID)': 'sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)',
+    's.sessionMgr.Delete("cli", sessionID)': 's.sessionMgr.Delete(sessionChannelFromParams(params), sessionID)',
+}
+for old, new in repls.items():
+    text = text.replace(old, new)
+text = text.replace('''	id, err := ag.EnsureSession(context.Background(), sess.ID)
+	if err != nil {
+		return "", err
+	}
+	sess.AgentSession = sess.ID
+	s.sessionMgr.Update(sess)
+''', '''	id, err := ag.EnsureSession(context.Background(), sess.ID)
+	if err != nil {
+		return "", err
+	}
+	// ACPX prompts are addressed by the stable session name we chose (`sess.ID`).
+	// Preserve the returned internal ID separately for observability.
+	sess.AgentSession = sess.ID
+	sess.AgentSessionID = id
+	s.sessionMgr.Update(sess)
+''')
+path.write_text(text)
+PY (completed)
+  kind: execute
+  input: {"call_id":"call_0vRjn4pg42X7vXA716pBuN8g","process_id":"27748","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+  output:
+    {
+      "call_id": "call_0vRjn4pg42X7vXA716pBuN8g",
+      "process_id": "27748",
+      "turn_id": "019d47bd-89f5-7bd3-964d-573a81d3cccb",
+      "command": [
+        "/bin/zsh",
+        "-lc",
+        "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/server.go')\ntext = path.read_text()\ninsert = '''const defaultSessionChannel = \"cli\"\n\n'''\nmarker = '// StreamEvent represents a structured event in the stream.\\n'\nif insert not in text:\n    text = text.replace(marker, insert + marker)\ntext = text.replace('''func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {\n''', '''func sessionChannelFromRequest(r *http.Request) string {\n\\tif channel := r.URL.Query().Get(\"channel\"); channel != \"\" {\n\\t\\treturn channel\n\\t}\n\\treturn defaultSessionChannel\n}\n\nfunc sessionChannelFromParams(params map[string]interface{}) string {\n\\tif params != nil {\n\\t\\tif channel := getStringParam(params, \"channel\"); channel != \"\" {\n\\t\\t\\treturn channel\n\\t\\t}\n\\t}\n\\treturn defaultSessionChannel\n}\n\nfunc (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {\n''')\nrepls = {\n    's.sessionMgr.Get(\"cli\", sessionID)': 's.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)',\n    's.sessionMgr.GetOrCreate(\"cli\", \"\", sessionID, newAgent)': 's.sessionMgr.GetOrCreate(defaultSessionChannel, \"\", sessionID, newAgent)',\n    's.sessionMgr.Create(\"cli\", \"\", uuid.NewString(), agentType)': 's.sessionMgr.Create(defaultSessionChannel, \"\", uuid.NewString(), agentType)',\n    'sess := s.sessionMgr.GetOrCreate(\"cli\", \"\", sessionID, agentType)': 'sess := s.sessionMgr.GetOrCreate(defaultSessionChannel, \"\", sessionID, agentType)',\n    'sess, _ = s.sessionMgr.Get(\"cli\", sessionID)': 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)',\n    'updated, _ := s.sessionMgr.Get(\"cli\", sess.ID)': 'updated, _ := s.sessionMgr.Get(defaultSessionChannel, sess.ID)',\n    's.sessionMgr.RecordPrompt(\"cli\"...
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_oDEkE8Tqj6vLh3Nr76NNU9FY","process_id":"82548","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '730,820p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_JL9TBURbrAQYtDue0vSmftb0","process_id":"76373","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '50,230p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/i...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_r812lF87CE0Inw06haro1g51","process_id":"53756","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '340,560p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_oDEkE8Tqj6vLh3Nr76NNU9FY","process_id":"82548","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '730,820p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    SuppressReads:       getBoolParam(params, "suppress_reads"),
+    		Model:               getStringParam(params, "model"),
+    		AllowedTools:        getStringParam(params, "allowed_tools"),
+    		MaxTurns:            getIntParam(params, "max_turns"),
+    		PromptRetries:       getIntParam(params, "prompt_retries"),
+    		Timeout:             getIntParam(params, "timeout"),
+    		TTL:                 getIntParam(params, "ttl"),
+    	}
+    }
+    
+    func resolveSessionID(connID, specifiedSessionID string) string {
+    	if specifiedSessionID != "" {
+    		return specifiedSessionID
+    	}
+    	if connID != "" {
+    		return connID
+    	}
+    	return "default"
+    }
+    
+    func invalidParams(id string) *JSONRPCResponse {
+    	return &JSONRPCResponse{JSONRPC: "2.0", ID: id, Error: &JSONRPCError{Code: -32602, Message: "Invalid params"}}
+    }
+    
+    func missingParam(id, name string) *JSONRPCResponse {
+    	return &JSONRPCResponse{JSONRPC: "2.0", ID: id, Error: &JSONRPCError{Code: -32602, Message: fmt.Sprintf("Missing required param: %s", name)}}
+    }
+    
+    ... (63 more lines)
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_JL9TBURbrAQYtDue0vSmftb0","process_id":"76373","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '50,230p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/i...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    }
+    
+    // WSConnection represents a WebSocket connection.
+    type WSConnection struct {
+    	*websocket.Conn
+    	ID string
+    	mu sync.Mutex
+    }
+    
+    const defaultSessionChannel = "cli"
+    
+    // StreamEvent represents a structured event in the stream.
+    type StreamEvent = agent.Event
+    
+    // NewServer creates a new gateway server.
+    func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
+    	return &Server{
+    		config:      cfg,
+    		sessionMgr:  sessionMgr,
+    		agentMgr:    agentMgr,
+    		connections: make(map[string]*WSConnection),
+    	}
+    }
+    
+    // Start starts the gateway server.
+    func (s *Server) Start(ctx context.Context) error {
+    	s.mu.Lock()
+    	if s.running {
+    ... (153 more lines)
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_r812lF87CE0Inw06haro1g51","process_id":"53756","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '340,560p' internal/gateway/server.go"],"cwd":"/Users/chaoyuepan/ai/...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    case "ask_stream":
+    		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "ask_stream requires WebSocket connection"}}
+    	case "session.init":
+    		return s.handleSessionInit(connID, req)
+    	case "session.new":
+    		return s.handleSessionNew(connID, req)
+    	case "session.get":
+    		return s.handleSessionGet(connID, req)
+    	case "session.list":
+    		return s.handleSessionList(connID, req)
+    	case "session.update":
+    		return s.handleSessionUpdate(connID, req)
+    	case "session.delete":
+    		return s.handleSessionDelete(connID, req)
+    	case "agents.list":
+    		return s.handleAgentsList(connID, req)
+    	default:
+    		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "Method not found"}}
+    	}
+    }
+    
+    func (s *Server) handleAsk(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+    	params, ok := req.Params.(map[string]interface{})
+    	if !ok {
+    		return invalidParams(req.ID)
+    	}
+    
+    	content, _ := params["content"].(string)
+    ... (193 more lines)
+
+[tool] Read session.go (running)
+  input: {"call_id":"call_xtF6iagX7qsQbcd1kpH5dFAT","process_id":"53779","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '30,60p' internal/session/session.go"],"cwd":"/Users/chaoyuepan/ai/i...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+
+[tool] Read session.go (completed)
+  kind: read
+  input: {"call_id":"call_xtF6iagX7qsQbcd1kpH5dFAT","process_id":"53779","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","sed -n '30,60p' internal/session/session.go"],"cwd":"/Users/chaoyuepan/ai/i...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+  output:
+    Timestamp time.Time    `json:"timestamp"`
+    	Prompt    string       `json:"prompt,omitempty"`
+    	Content   string       `json:"content,omitempty"`
+    	Error     string       `json:"error,omitempty"`
+    	Event     *agent.Event `json:"event,omitempty"`
+    }
+    
+    // Session represents a conversation session.
+    type Session struct {
+    	ID           string                 `json:"id"`
+    	Channel      string                 `json:"channel"`
+    	AccountID    string                 `json:"account_id"`
+    	ChatID       string                 `json:"chat_id"`
+    	AgentName      string                 `json:"agent_name"`
+    	AgentSession   string                 `json:"agent_session"`    // session handle used for subsequent prompts
+    	AgentSessionID string                 `json:"agent_session_id"` // ACPX internal session ID, when available
+    	CreatedAt      time.Time              `json:"created_at"`
+    	LastActive   time.Time              `json:"last_active"`
+    	Status       string                 `json:"status"`
+    	LastPrompt   string                 `json:"last_prompt,omitempty"`
+    	LastOutput   string                 `json:"last_output,omitempty"`
+    	LastError    string                 `json:"last_error,omitempty"`
+    	Active       bool                   `json:"active"`
+    	Activity     []Activity             `json:"activity,omitempty"`
+    	Metadata     map[string]interface{} `json:"metadata"`
+    }
+    
+    // SessionSummary is the lightweight projection used by list APIs and broadcasts.
+    ... (3 more lines)
+我刚把 channel helper 收进来了，但自动替换把几个 JSON-RPC handler 改坏了，正在收口到 `sessionChannelFromParams(params)`，然后补针对缺参和不存在 session 的测试。
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+text = text.replace('sess, _ = s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)')
+text = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')
+text = text.replace('updated, _ := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'updated, _ := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')
+path.write_text(text)
+PY
+python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server_ui_test.go')
+text = path.read_text()
+add = '''
+func TestHandleSessionUpdateMissingSessionID(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "req-missing",
+		Method:  "session.update",
+		Params: map[string]interface{}{
+			"agent": "codex",
+		},
+	})
+	if resp.Error == nil || resp.Error.Message != "Missing required param: session_id" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestHandleSessionUpdateMissingSession(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "req-missing-session",
+		Method:  "session.update",
+		Params: map[string]interface{}{
+			"session_id": "does-not-exist",
+			"agent":      "codex",
+		},
+	})
+	if resp.Error == nil || resp.Error.Message != "Session not found" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestHandleSessionDetailAPINotFound(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleSessionDetailAPI(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+}
+'''
+needle = 'func TestHandleUIServesEmbeddedFrontend(t *testing.T) {\n'
+if add not in text:
+    text = text.replace(needle, add + '\n' + needle)
+path.write_text(text)
+PY (running)
+  input: {"call_id":"call_RXqs2vr8q7sarYvL191AoqLu","process_id":"48147","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+text = text.replace('sess, _ = s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)')
+text = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')
+text = text.replace('updated, _ := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'updated, _ := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')
+path.write_text(text)
+PY
+python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server_ui_test.go')
+text = path.read_text()
+add = '''
+func TestHandleSessionUpdateMissingSessionID(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "req-missing",
+		Method:  "session.update",
+		Params: map[string]interface{}{
+			"agent": "codex",
+		},
+	})
+	if resp.Error == nil || resp.Error.Message != "Missing required param: session_id" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestHandleSessionUpdateMissingSession(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "req-missing-session",
+		Method:  "session.update",
+		Params: map[string]interface{}{
+			"session_id": "does-not-exist",
+			"agent":      "codex",
+		},
+	})
+	if resp.Error == nil || resp.Error.Message != "Session not found" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestHandleSessionDetailAPINotFound(t *testing.T) {
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleSessionDetailAPI(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+}
+'''
+needle = 'func TestHandleUIServesEmbeddedFrontend(t *testing.T) {\n'
+if add not in text:
+    text = text.replace(needle, add + '\n' + needle)
+path.write_text(text)
+PY (completed)
+  kind: execute
+  input: {"call_id":"call_RXqs2vr8q7sarYvL191AoqLu","process_id":"48147","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+  output:
+    {
+      "call_id": "call_RXqs2vr8q7sarYvL191AoqLu",
+      "process_id": "48147",
+      "turn_id": "019d47bd-89f5-7bd3-964d-573a81d3cccb",
+      "command": [
+        "/bin/zsh",
+        "-lc",
+        "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/server.go')\ntext = path.read_text()\ntext = text.replace('sess, _ = s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)')\ntext = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')\ntext = text.replace('updated, _ := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 'updated, _ := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)')\npath.write_text(text)\nPY\npython3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/server_ui_test.go')\ntext = path.read_text()\nadd = '''\nfunc TestHandleSessionUpdateMissingSessionID(t *testing.T) {\n\tsrv := NewServer(&Config{}, session.NewManager(), agent.NewManager())\n\tresp := srv.handleSessionUpdate(\"\", &JSONRPCRequest{\n\t\tJSONRPC: \"2.0\",\n\t\tID:      \"req-missing\",\n\t\tMethod:  \"session.update\",\n\t\tParams: map[string]interface{}{\n\t\t\t\"agent\": \"codex\",\n\t\t},\n\t})\n\tif resp.Error == nil || resp.Error.Message != \"Missing required param: session_id\" {\n\t\tt.Fatalf(\"unexpected response: %#v\", resp)\n\t}\n}\n\nfunc TestHandleSessionUpdateMissingSession(t *testing.T) {\n\tsrv := NewServer(&Config{}, session.NewManager(), agent.NewManager())\n\tresp := srv.handleSessionUpdate(\"\", &JSONRPCRequest{\n\t\tJSONRPC: \"2.0\",\n\t\tID:      \"req-missing-session\",\n\t\tMethod:  \"session.update\",\n\t\tParams: map[string]interface{}{\n\t\t\t\"session_id\": \"does-not-exist\",\n\t\t\t\"agent\":      \"codex\",\n\t\t},\n\t})\n\tif resp.Error == nil || resp.Error.Message != \"Session not found\" {\n\t\tt.Fatalf(\"unexpected response: %#v\", resp)\n\t}...
+
+[tool] Run gofmt -w internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (running)
+  input: {"call_id":"call_pKK9rrGiiWt2Pan4VKIv8enj","process_id":"27964","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","gofmt -w internal/session/session.go internal/gateway/server.go internal/ga...
+
+[tool] Run gofmt -w internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (completed)
+  kind: execute
+  input: {"call_id":"call_pKK9rrGiiWt2Pan4VKIv8enj","process_id":"27964","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","gofmt -w internal/session/session.go internal/gateway/server.go internal/ga...
+  output:
+    {
+      "call_id": "call_pKK9rrGiiWt2Pan4VKIv8enj",
+      "process_id": "27964",
+      "turn_id": "019d47bd-89f5-7bd3-964d-573a81d3cccb",
+      "command": [
+        "/bin/zsh",
+        "-lc",
+        "gofmt -w internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go"
+      ],
+      "cwd": "/Users/chaoyuepan/ai/imclaw",
+      "parsed_cmd": [
+        {
+          "type": "unknown",
+          "cmd": "gofmt -w internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go"
+        }
+      ],
+      "source": "unified_exec_startup",
+      "stdout": "",
+      "stderr": "",
+      "aggregated_output": "",
+      "exit_code": 0,
+      "duration": {
+        "secs": 0,
+        "nanos": 1584
+      },
+      "formatted_output": "",
+      "status": "completed"
+    }
+
+[tool] Run go test ./internal/gateway ./internal/session (running)
+  input: {"call_id":"call_RUwB9O94YNBjMS2VK5W1Ry6x","process_id":"34763","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./internal/gateway ./internal/session"],"cwd":"/Users/chaoyuepan/ai...
+
+[tool] Run go test ./internal/gateway ./internal/session (failed)
+  kind: execute
+  input: {"call_id":"call_RUwB9O94YNBjMS2VK5W1Ry6x","process_id":"34763","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./internal/gateway ./internal/session"],"cwd":"/Users/chaoyuepan/ai...
+  output:
+    # github.com/smallnest/imclaw/internal/gateway [github.com/smallnest/imclaw/internal/gateway.test]
+    internal/gateway/server.go:199:56: undefined: params
+    FAIL	github.com/smallnest/imclaw/internal/gateway [build failed]
+    ok  	github.com/smallnest/imclaw/internal/session	0.764s
+    FAIL
+    
+    ```sh
+    # github.com/smallnest/imclaw/internal/gateway [github.com/smallnest/imclaw/internal/gateway.test]
+    internal/gateway/server.go:199:56: undefined: params
+    FAIL	github.com/smallnest/imclaw/internal/gateway [build failed]
+    ok  	github.com/smallnest/imclaw/internal/session	0.764s
+    FAIL
+    ```
+编译报错在 `handleSessionDetailAPI` 附近，我去修这个遗漏后再跑全量测试。
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_9rgtMMGdjKr58CJktO86ULWu","process_id":"66503","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '188,206p'"],"cwd":"/Users/chaoy...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_9rgtMMGdjKr58CJktO86ULWu","process_id":"66503","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '188,206p'"],"cwd":"/Users/chaoy...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    188		if r.Method != http.MethodGet {
+       189			w.WriteHeader(http.StatusMethodNotAllowed)
+       190			return
+       191		}
+       192	
+       193		sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+       194		if sessionID == "" {
+       195			http.NotFound(w, r)
+       196			return
+       197		}
+       198	
+       199		sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)
+       200		if !ok {
+       201			http.NotFound(w, r)
+       202			return
+       203		}
+       204	
+       205		w.Header().Set("Content-Type", "application/json")
+       206		_ = json.NewEncoder(w).Encode(sess)
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+text = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 1)
+path.write_text(text)
+PY
+gofmt -w internal/gateway/server.go
+ (running)
+  input: {"call_id":"call_WyH3rwqgmzXutJVRBsWtBs9s","process_id":"16090","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+
+[tool] Run python3 - <<'PY'
+from pathlib import Path
+path = Path('internal/gateway/server.go')
+text = path.read_text()
+text = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 1)
+path.write_text(text)
+PY
+gofmt -w internal/gateway/server.go
+ (completed)
+  kind: execute
+  input: {"call_id":"call_WyH3rwqgmzXutJVRBsWtBs9s","process_id":"16090","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/s...
+  output:
+    {
+      "call_id": "call_WyH3rwqgmzXutJVRBsWtBs9s",
+      "process_id": "16090",
+      "turn_id": "019d47bd-89f5-7bd3-964d-573a81d3cccb",
+      "command": [
+        "/bin/zsh",
+        "-lc",
+        "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/server.go')\ntext = path.read_text()\ntext = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 1)\npath.write_text(text)\nPY\ngofmt -w internal/gateway/server.go\n"
+      ],
+      "cwd": "/Users/chaoyuepan/ai/imclaw",
+      "parsed_cmd": [
+        {
+          "type": "unknown",
+          "cmd": "python3 - <<'PY'\nfrom pathlib import Path\npath = Path('internal/gateway/server.go')\ntext = path.read_text()\ntext = text.replace('sess, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)', 'sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)', 1)\npath.write_text(text)\nPY\ngofmt -w internal/gateway/server.go\n"
+        }
+      ],
+      "source": "unified_exec_startup",
+      "stdout": "",
+      "stderr": "",
+      "aggregated_output": "",
+      "exit_code": 0,
+      "duration": {
+        "secs": 0,
+        "nanos": 1709
+      },
+      "formatted_output": "",
+      "status": "completed"
+    }
+
+[tool] Run go test ./... (running)
+  input: {"call_id":"call_d5rh4PSyjceLhiU7WN51yc6Y","process_id":"19282","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./..."],"cwd":"/Users/chaoyuepan/ai/imclaw","parsed_cmd":[{"type":"...
+
+[tool] Run go test ./internal/gateway ./internal/session (running)
+  input: {"call_id":"call_UByZjPEEckG3a40DssxNqPCs","process_id":"51156","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./internal/gateway ./internal/session"],"cwd":"/Users/chaoyuepan/ai...
+
+[tool] Run git diff --stat -- internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (running)
+  input: {"call_id":"call_Gp2PEJJNsGzMloExxX9wkHad","process_id":"8625","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","git diff --stat -- internal/session/session.go internal/gateway/server.go in...
+
+[tool] Run git diff --stat -- internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (completed)
+  kind: execute
+  input: {"call_id":"call_Gp2PEJJNsGzMloExxX9wkHad","process_id":"8625","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","git diff --stat -- internal/session/session.go internal/gateway/server.go in...
+  output:
+    internal/gateway/server.go  | 793 +++++++++++++++++++-------------------------
+     internal/session/session.go | 358 ++++++++++++++++----
+     2 files changed, 640 insertions(+), 511 deletions(-)
+
+[tool] Run go test ./... (completed)
+  kind: execute
+  input: {"call_id":"call_d5rh4PSyjceLhiU7WN51yc6Y","process_id":"19282","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./..."],"cwd":"/Users/chaoyuepan/ai/imclaw","parsed_cmd":[{"type":"...
+  output:
+    ?   	github.com/smallnest/imclaw/cmd/imclaw	[no test files]
+    ok  	github.com/smallnest/imclaw/cmd/imclaw-cli	(cached)
+    ok  	github.com/smallnest/imclaw/internal/agent	(cached)
+    ok  	github.com/smallnest/imclaw/internal/event	(cached)
+    ok  	github.com/smallnest/imclaw/internal/gateway	0.347s
+    ok  	github.com/smallnest/imclaw/internal/session	(cached)
+    ok  	github.com/smallnest/imclaw/internal/transcript	(cached)
+    
+    ```sh
+    ?   	github.com/smallnest/imclaw/cmd/imclaw	[no test files]
+    ok  	github.com/smallnest/imclaw/cmd/imclaw-cli	(cached)
+    ok  	github.com/smallnest/imclaw/internal/agent	(cached)
+    ok  	github.com/smallnest/imclaw/internal/event	(cached)
+    ok  	github.com/smallnest/imclaw/internal/gateway	0.347s
+    ok  	github.com/smallnest/imclaw/internal/session	(cached)
+    ok  	github.com/smallnest/imclaw/internal/transcript	(cached)
+    ```
+
+[tool] Run go test ./internal/gateway ./internal/session (completed)
+  kind: execute
+  input: {"call_id":"call_UByZjPEEckG3a40DssxNqPCs","process_id":"51156","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","go test ./internal/gateway ./internal/session"],"cwd":"/Users/chaoyuepan/ai...
+  output:
+    ok  	github.com/smallnest/imclaw/internal/gateway	0.553s
+    ok  	github.com/smallnest/imclaw/internal/session	(cached)
+    
+    ```sh
+    ok  	github.com/smallnest/imclaw/internal/gateway	0.553s
+    ok  	github.com/smallnest/imclaw/internal/session	(cached)
+    ```
+实现已经收口：`AgentSession` 语义现在拆清了，channel 不再散落硬编码，错误路径测试也补上并通过。最后我整理变更摘要。
+
+[tool] Run git diff --numstat -- internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (running)
+  input: {"call_id":"call_LByya0hhgDxK4OO4cv3zMsLb","process_id":"98361","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","git diff --numstat -- internal/session/session.go internal/gateway/server.g...
+
+[tool] Run git diff --numstat -- internal/session/session.go internal/gateway/server.go internal/gateway/server_ui_test.go (completed)
+  kind: execute
+  input: {"call_id":"call_LByya0hhgDxK4OO4cv3zMsLb","process_id":"98361","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","git diff --numstat -- internal/session/session.go internal/gateway/server.g...
+  output:
+    344	449	internal/gateway/server.go
+    296	62	internal/session/session.go
+
+[tool] Search ^func Test in server_test.go (running)
+  input: {"call_id":"call_cjba3wF88jbOx1paRkZ01pFJ","process_id":"52316","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n '^func Test' internal/gateway/server_test.go internal/gateway/server_...
+
+[tool] Search ^func Test in server_test.go (completed)
+  kind: search
+  input: {"call_id":"call_cjba3wF88jbOx1paRkZ01pFJ","process_id":"52316","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","rg -n '^func Test' internal/gateway/server_test.go internal/gateway/server_...
+  output:
+    internal/gateway/server_test.go:11:func TestApplyStreamChunkAggregatesContentWithoutDoneDuplication(t *testing.T) {
+    internal/gateway/server_test.go:26:func TestApplyStreamChunkCapturesErrorSeparately(t *testing.T) {
+    internal/gateway/server_test.go:41:func TestBuildStructuredEventsPrefersNativeAgentEvents(t *testing.T) {
+    internal/gateway/server_test.go:58:func TestBuildStructuredEventsFallsBackToTranscriptParser(t *testing.T) {
+    internal/gateway/server_test.go:87:func TestBuildStructuredEventsIncludesFallbackErrors(t *testing.T) {
+    internal/gateway/server_ui_test.go:13:func TestSessionsAPIAndDetailIncludePersistedActivity(t *testing.T) {
+    internal/gateway/server_ui_test.go:59:func TestHandleSessionUpdateChangesAgent(t *testing.T) {
+    internal/gateway/server_ui_test.go:95:func TestHandleSessionUpdateMissingSessionID(t *testing.T) {
+    internal/gateway/server_ui_test.go:110:func TestHandleSessionUpdateMissingSession(t *testing.T) {
+    internal/gateway/server_ui_test.go:126:func TestHandleSessionDetailAPINotFound(t *testing.T) {
+    internal/gateway/server_ui_test.go:137:func TestHandleUIServesEmbeddedFrontend(t *testing.T) {
+    internal/session/session_test.go:9:func TestManagerRecordsSessionActivity(t *testing.T) {
+    internal/session/session_test.go:46:func TestSummariesSortedByLastActive(t *testing.T) {
+
+[tool] Read session.go (running)
+  input: {"call_id":"call_wlhoSVCCFgkpIFmYjpzJEBNL","process_id":"34484","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/session/session.go | sed -n '30,80p'"],"cwd":"/Users/chaoyu...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_ZpOwewaYKDp4GoDs1ZnLatJ3","process_id":"71107","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '60,230p'"],"cwd":"/Users/chaoyu...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read session.go (completed)
+  kind: read
+  input: {"call_id":"call_wlhoSVCCFgkpIFmYjpzJEBNL","process_id":"34484","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/session/session.go | sed -n '30,80p'"],"cwd":"/Users/chaoyu...
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go
+  output:
+    30		Timestamp time.Time    `json:"timestamp"`
+        31		Prompt    string       `json:"prompt,omitempty"`
+        32		Content   string       `json:"content,omitempty"`
+        33		Error     string       `json:"error,omitempty"`
+        34		Event     *agent.Event `json:"event,omitempty"`
+        35	}
+        36	
+        37	// Session represents a conversation session.
+        38	type Session struct {
+        39		ID             string                 `json:"id"`
+        40		Channel        string                 `json:"channel"`
+        41		AccountID      string                 `json:"account_id"`
+        42		ChatID         string                 `json:"chat_id"`
+        43		AgentName      string                 `json:"agent_name"`
+        44		AgentSession   string                 `json:"agent_session"`    // session handle used for subsequent prompts
+        45		AgentSessionID string                 `json:"agent_session_id"` // ACPX internal session ID, when available
+        46		CreatedAt      time.Time              `json:"created_at"`
+        47		LastActive     time.Time              `json:"last_active"`
+        48		Status         string                 `json:"status"`
+        49		LastPrompt     string                 `json:"last_prompt,omitempty"`
+        50		LastOutput     string                 `json:"last_output,omitempty"`
+        51		LastError      string                 `json:"last_error,omitempty"`
+        52		Active         bool                   `json:"active"`
+        53		Activity       []Activity             `json:"activity,omitempty"`
+        54		Metadata       map[string]interface{} `json:"metadata"`
+        55	}
+        56	
+        57	// SessionSummary is the lightweight projection used by list APIs and broadcasts.
+    ... (23 more lines)
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_ZpOwewaYKDp4GoDs1ZnLatJ3","process_id":"71107","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '60,230p'"],"cwd":"/Users/chaoyu...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    60	
+        61	// StreamEvent represents a structured event in the stream.
+        62	type StreamEvent = agent.Event
+        63	
+        64	// NewServer creates a new gateway server.
+        65	func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
+        66		return &Server{
+        67			config:      cfg,
+        68			sessionMgr:  sessionMgr,
+        69			agentMgr:    agentMgr,
+        70			connections: make(map[string]*WSConnection),
+        71		}
+        72	}
+        73	
+        74	// Start starts the gateway server.
+        75	func (s *Server) Start(ctx context.Context) error {
+        76		s.mu.Lock()
+        77		if s.running {
+        78			s.mu.Unlock()
+        79			return fmt.Errorf("server already running")
+        80		}
+        81		s.running = true
+        82		s.mu.Unlock()
+        83	
+        84		go s.startServer(ctx)
+        85		go func() {
+        86			<-ctx.Done()
+        87			_ = s.Stop()
+    ... (143 more lines)
+
+[tool] Read server.go (running)
+  input: {"call_id":"call_2wzQua1z84tWcwvbuqjQvC54","process_id":"36277","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '480,530p'"],"cwd":"/Users/chaoy...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+
+[tool] Read server.go (completed)
+  kind: read
+  input: {"call_id":"call_2wzQua1z84tWcwvbuqjQvC54","process_id":"36277","turn_id":"019d47bd-89f5-7bd3-964d-573a81d3cccb","command":["/bin/zsh","-lc","nl -ba internal/gateway/server.go | sed -n '480,530p'"],"cwd":"/Users/chaoy...
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go
+  output:
+    480					log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+       481					cancel()
+       482					return
+       483				}
+       484			}
+       485		}
+       486	
+       487		if streamErr != "" {
+       488			if !sawErrorEvent {
+       489				s.recordError(sess.ID, req.ID, streamErr)
+       490			}
+       491			_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: fmt.Sprintf("Agent error: %s", streamErr)}})
+       492			return
+       493		}
+       494	
+       495		s.recordResult(sess.ID, req.ID, fullContent.String())
+       496		_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": fullContent.String(), "session_id": sess.ID, "agent": ag.Type()}})
+       497	}
+       498	
+       499	func (s *Server) prepareSession(sessionID, agentType string) *session.Session {
+       500		sess := s.sessionMgr.GetOrCreate(defaultSessionChannel, "", sessionID, agentType)
+       501		if agentType != "" && sess.AgentName != agentType {
+       502			sess.AgentName = agentType
+       503			s.sessionMgr.Update(sess)
+       504			sess, _ = s.sessionMgr.Get(defaultSessionChannel, sessionID)
+       505		}
+       506		s.broadcastSession(sess)
+       507		return sess
+    ... (23 more lines)
+## 反馈理解
+
+审核者提出以下问题：
+1. `ensureAgentSession` 的 `AgentSession` 赋值语义不清晰。我的理解：这里不能直接改成用 ACPX 返回的内部 id 去做后续 prompt，因为 `internal/agent` 当前约定后续 `-s` 传的是稳定 session name；但需要把“用于 prompt 的 handle”和“ACPX 内部 id”拆开，避免误解。
+2. `server.go` 里多处硬编码 `"cli"`。我的理解：当前实现确实把 channel 当默认值散落使用，应该收敛成统一 helper/常量，并允许 API/JSON-RPC 显式传 channel。
+3. 错误路径测试不足。我的理解：需要补 `session.update` 缺参、不存在 session、detail API 404 这些回归测试。
+
+我已按这个理解修正。
+
+## 改进报告
+
+### 已修复问题
+- `AgentSession` 语义混淆：在 [internal/session/session.go](/Users/chaoyuepan/ai/imclaw/internal/session/session.go#L38) 新增 `AgentSessionID` 保存 ACPX 返回的内部 id；[internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go#L510) 保持 `AgentSession` 作为后续 prompt 使用的稳定 handle，并加注释说明原因。
+- 硬编码 channel：在 [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go#L171) 增加统一的 channel helper，HTTP detail API 支持查询参数 `channel`，JSON-RPC session 相关方法支持 params 里的 `channel`。
+- 错误路径测试：在 [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go) 增加了 `session.update` 缺少 `session_id`、更新不存在 session、detail API 404 的测试。
+
+### 未采纳建议
+- 直接把 `sess.AgentSession = id`：未采纳。原因是 [internal/agent/agent.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go#L299) 和 [internal/agent/agent.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go#L390) 这条链路当前用 session name 作为后续 prompt 的 `-s` 参数；直接切到内部 id 会改变既有 agent 契约，风险更高。现在改为“语义拆分”而不是“行为替换”。
+
+### 新增改动
+- 统一默认 channel 常量，减少散落字符串字面量。
+- 会话详情查询现在可以显式传 `channel`。
+- 增加了 ACPX internal id 的可观测性字段，方便后续排障。
+
+## 实现报告
+
+### Issue
+- 编号: #6
+- 标题: feat: add web UI for sessions, streams, and tool activity
+- 类型: feature
+
+### 改动概述
+- 修改文件: [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go), [internal/session/session.go](/Users/chaoyuepan/ai/imclaw/internal/session/session.go), [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go)
+- 新增文件: 无
+- 删除文件: 无
+- 代码行数: +640 / -511
+
+### 实现思路
+这轮主要针对审核反馈做收口，而不是重做 UI。核心修正是把会话里 agent 相关状态拆成两个层次：`AgentSession` 继续保存网关后续调用 ACPX 时要传的稳定 session handle，`AgentSessionID` 保存 ACPX 返回的内部 id，用于可观测性和排障。这样既修复了字段语义混淆，也不破坏现有 agent 调用约定。
+
+另外把 session channel 访问统一收进 helper，避免 `"cli"` 在 gateway 里到处散落；并给会话详情/更新相关路径补齐了错误分支测试，确保缺参和不存在 session 都有稳定行为。
+
+### 测试情况
+- 测试文件: [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go), [internal/session/session_test.go](/Users/chaoyuepan/ai/imclaw/internal/session/session_test.go)
+- 测试用例数: 13
+- 覆盖场景:
+  - 结构化流事件与 transcript fallback
+  - sessions 列表与详情 API
+  - `session.update` 切换 agent
+  - `session.update` 缺少 `session_id`
+  - `session.update` 更新不存在的 session
+  - detail API 404
+  - session 活动记录与摘要排序
+- 验证命令: `go test ./...`
+
+### 自评
+- 代码质量: 8/10
+- 测试覆盖: 9/10
+- 整体评分: 8/10
+
+### 待确认问题
+- 无
+
+[done] end_turn

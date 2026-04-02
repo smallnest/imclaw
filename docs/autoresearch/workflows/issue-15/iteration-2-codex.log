@@ -1,0 +1,41 @@
+[acpx] session cwd (019d4739-9df6-7042-8b29-1c888afab671) · /Users/chaoyuepan/ai/imclaw · agent connected
+## 实现报告
+
+### Issue
+- 编号: #15
+- 标题: feat: define source-of-truth event protocol from agent layer
+- 类型: feature
+
+### 改动概述
+- 修改文件: [internal/agent/agent.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go), [internal/agent/agent_test.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go), [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go), [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [cmd/imclaw-cli/main.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main.go), [cmd/imclaw-cli/main_test.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go)
+- 新增文件: 无
+- 删除文件: 无
+- 代码行数: +557 / -84
+
+### 实现思路
+在 `internal/agent` 内定义了版本化原生事件协议，新增 `agent.Event`、`agent.EventType` 和 `EventProtocolVersion`，并将流式返回结构 `StreamChunk` 扩展为可携带原生 `Events`。当前 ACPX 路径通过 agent 层内置的 `ProtocolParser` 生成 `thinking_start`、`thinking_delta`、`thinking_end`、`tool_start`、`tool_input`、`tool_output`、`tool_end`、`output_delta`、`output_final`、`error`、`done`。
+
+gateway 已改为优先转发 agent 原生事件，不再默认从 transcript 重建语义；只有后端未提供原生事件时，才回退到旧的 transcript parser 并映射到新协议。CLI 侧也切换为消费 `agent.Event`，同时保留 transcript fallback 兼容路径。
+
+### 测试情况
+- 测试文件: [internal/agent/agent_test.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go), [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [cmd/imclaw-cli/main_test.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go)
+- 测试用例数: 18
+- 覆盖场景:
+  - agent 流式成功/失败终态事件
+  - thinking/tool/output 生命周期顺序
+  - gateway 优先转发原生事件
+  - gateway transcript fallback 映射
+  - CLI 解析新版事件通知
+  - 兼容 transcript 最终输出回退
+- 验证结果: `go test ./...` 通过
+
+### 自评
+- 代码质量: 8/10
+- 测试覆盖: 8/10
+- 整体评分: 8/10
+
+### 待确认问题
+- 当前“source-of-truth”已经提升到 `internal/agent`，但 ACPX 后端本身仍是 transcript 适配生成事件，不是后端进程真正原生 hook。
+- fallback 映射路径会把旧粗粒度事件展开成新版协议，兼容性有了，但不同后端的事件粒度暂时仍可能不完全一致。
+
+[done] end_turn

@@ -1,0 +1,570 @@
+[acpx] session cwd (7e978129-1029-47d2-892b-57c56e78e665) · /Users/chaoyuepan/ai/imclaw · agent connected
+[thinking] 用户再次要求审核 Issue #6 的实现。我刚才已经完成了一次审核，现在用户可能希望我：
+           1. 重新审视，可能发现遗漏的问题
+           2. 或者这是一个新的审核请求
+           
+           让我重新仔细检查代码，看看是否有我遗漏的问题。特别是：
+           
+           1. 我之前标记的严重问题 - Agent Session ID 逻辑错误
+           2. 是否有其他并发问题
+           3. 是否有资源泄漏
+           4. 是否有其他逻辑错误
+           
+           让我再仔细看一下代码，特别是并发和资源泄漏方面。
+我将重新对 Issue #6 的实现进行深入审核，特别关注并发安全、资源泄漏等方面。
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read internal/session/session.go (200 - 299) (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/session/session.go","offset":200,"limit":100}
+  files: /Users/chaoyuepan/ai/imclaw/internal/session/session.go:200
+  output:
+    200→		ID:        int64(len(s.Activity) + 1),
+       201→		Type:      ActivityError,
+       202→		RequestID: requestID,
+       203→		Timestamp: at,
+       204→		Error:     message,
+       205→	})
+       206→}
+       207→
+       208→// Summary returns a lightweight session view for list rendering.
+       209→func (s *Session) Summary() SessionSummary {
+       210→	return SessionSummary{
+       211→		ID:         s.ID,
+       212→		Channel:    s.Channel,
+       213→		AccountID:  s.AccountID,
+       214→		ChatID:     s.ChatID,
+       215→		AgentName:  s.AgentName,
+       216→		CreatedAt:  s.CreatedAt,
+       217→		LastActive: s.LastActive,
+       218→		Status:     s.Status,
+       219→		LastPrompt: s.LastPrompt,
+       220→		LastOutput: s.LastOutput,
+       221→		LastError:  s.LastError,
+       222→		Active:     s.Active,
+       223→		EventCount: len(s.Activity),
+       224→	}
+       225→}
+       226→
+       227→// Create creates a new session.
+    ... (183 more lines)
+
+[tool] Read internal/gateway/server.go (260 - 359) (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go","offset":260,"limit":100}
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go:260
+  output:
+    260→	s.connections[wsConn.ID] = wsConn
+       261→	s.connectionsMu.Unlock()
+       262→
+       263→	_ = wsConn.SendJSON(JSONRPCRequest{
+       264→		JSONRPC: "2.0",
+       265→		Method:  "connected",
+       266→		Params: map[string]interface{}{
+       267→			"session_id":  wsConn.ID,
+       268→			"server_time": time.Now().UTC(),
+       269→		},
+       270→	})
+       271→	_ = wsConn.SendJSON(JSONRPCRequest{
+       272→		JSONRPC: "2.0",
+       273→		Method:  "session.snapshot",
+       274→		Params: map[string]interface{}{
+       275→			"sessions": s.sessionMgr.Summaries(),
+       276→		},
+       277→	})
+       278→
+       279→	go s.handleWSMessages(wsConn)
+       280→}
+       281→
+       282→func (s *Server) authenticateHTTP(r *http.Request) bool {
+       283→	auth := r.Header.Get("Authorization")
+       284→	if len(auth) > 7 && auth[:7] == "Bearer " {
+       285→		return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(s.config.AuthToken)) == 1
+       286→	}
+       287→	return false
+    ... (183 more lines)
+
+[thinking] 让我仔细检查代码，看看是否有其他问题：
+           
+           1. **handleWSMessages 中的问题**：
+              - 行 328: `s.handleAskStream(conn, &req)` - 这里会启动一个 goroutine 来处理流，但是没有等待它完成。如果连接关闭，这个 goroutine 可能会继续运行并向已关闭的连接写入数据。
+              - 行 332: 其他 RPC 请求是同步处理的，这可能会阻塞消息循环
+           
+           2. **handleAskStream 的并发问题**：
+              - 这个函数会启动一个长时间运行的流，如果客户端断开连接，这个流可能会继续运行
+              - 需要检查 context 取消处理
+           
+           3. **SetAgentSession 方法**：
+              - 这个方法直接修改 Session，但没有锁保护。如果 Session 已经被返回给调用者，这会导致竞态条件。
+           
+           4. **broadcastJSON 中的锁问题**：
+              - 先 RLock 获取所有连接，然后发送消息，如果有失败就 Lock 删除
+              - 但是在发送过程中可能有新连接加入或旧连接删除
+           
+           5. **session.Activity 的并发访问**：
+              - 在 recordPrompt/Event/Result/Error 方法中直接修改 Activity
+              - 如果同时有多个请求访问同一个 session，可能会有竞态
+           
+           让我检查一下 handleAskStream 和相关的并发问题。
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] Read internal/gateway/server.go (389 - 488) (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go","limit":100,"offset":389}
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go:389
+  output:
+    389→	sess := s.prepareSession(sessionID, agentType)
+       390→	s.recordPrompt(sess.ID, req.ID, content)
+       391→
+       392→	ag := s.agentMgr.GetOrCreate(sess.AgentName)
+       393→	agentSessionID, err := s.ensureAgentSession(sess, ag, req.ID)
+       394→	if err != nil {
+       395→		return s.rpcAgentError(sess.ID, req.ID, "Failed to create agent session", err)
+       396→	}
+       397→
+       398→	response, err := ag.PromptWithOptions(context.Background(), agentSessionID, content, opts)
+       399→	if err != nil {
+       400→		return s.rpcAgentError(sess.ID, req.ID, "Agent error", err)
+       401→	}
+       402→
+       403→	s.recordResult(sess.ID, req.ID, response)
+       404→	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": response, "session_id": sess.ID, "agent": ag.Type()}}
+       405→}
+       406→
+       407→func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
+       408→	params, ok := req.Params.(map[string]interface{})
+       409→	if !ok {
+       410→		_ = conn.SendJSON(invalidParams(req.ID))
+       411→		return
+       412→	}
+       413→
+       414→	content, _ := params["content"].(string)
+       415→	agentType, _ := params["agent"].(string)
+       416→	if content == "" {
+    ... (183 more lines)
+
+[tool] grep "SetAgentSession" /Users/chaoyuepan/ai/imclaw (completed)
+  kind: search
+  input: /Users/chaoyuepan/ai/imclaw
+  output:
+    internal/session/session.go:281:// SetAgentSession sets the agent session ID.
+    internal/session/session.go:282:func (s *Session) SetAgentSession(agentSession string) {
+    docs/autoresearch/workflows/issue-6/iteration-4-claude.log:102:           3. **SetAgentSession 方法**：
+    docs/autoresearch/workflows/issue-6/iteration-1-codex.log:981:// SetAgentSession sets the agent session ID.
+    docs/autoresearch/workflows/issue-6/iteration-1-codex.log:982:func (s *Session) SetAgentSession(agentSession string) {
+    docs/autoresearch/workflows/issue-6/iteration-1-codex.log:1366:// SetAgentSession sets the agent session ID.
+    docs/autoresearch/workflows/issue-6/iteration-1-codex.log:1367:func (s *Session) SetAgentSession(agentSession string) {
+
+[thinking] 好的，我发现了几个问题：
+           
+           1. **handleAskStream 中的 goroutine 泄漏风险**：
+              - 这个函数在 `handleWSMessages` 中被调用（行 328），但不是在 goroutine 中调用的
+              - 所以它会阻塞消息循环
+              - 但是如果连接关闭，`defer cancel()` 会取消 context，这很好
+              - 不过问题在于，如果流处理时间很长，会阻塞其他消息的处理
+           
+           2. **SetAgentSession 方法未被使用且不安全**：
+              - 定义了这个方法但没有被调用
+              - 这个方法直接修改 Session，没有锁保护
+              - 如果 Session 已经被返回给调用者，会导致竞态条件
+           
+           3. **ensureAgentSession 中的 agent session ID 赋值错误**（我之前发现的）：
+              ```go
+              sess.AgentSession = sess.ID  // 应该是 id
+              ```
+           
+           4. **session.Activity 的并发访问问题**：
+              - `recordPrompt/Event/Result/Error` 方法会调用 `appendActivity`
+              - `appendActivity` 会修改 `s.Activity`
+              - 但是这些方法都在 Manager 的锁保护下调用，所以应该是安全的
+              - 不过 `Summary()` 方法在没有锁的情况下访问 `len(s.Activity)`，可能读到不一致的数据
+              
+           广播机制存在潜在的并发风险。在 `broadcastJSON` 中，先获取读锁复制连接列表，然后在锁外发送消息。如果发送失败，需要获取写锁删除连接。这种实现可能导致并发访问和同步问题。具体来说，快速失败的连接可能会在不同 goroutine 中被重复删除，引发竞争条件。
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep -A 2 "conn\.SendJSON" /Users/chaoyuepan/ai/imclaw/internal/gateway (completed)
+  kind: search
+  input: /Users/chaoyuepan/ai/imclaw/internal/gateway
+  output:
+    internal/gateway/server.go:320:			_ = conn.SendJSON(JSONRPCResponse{
+    internal/gateway/server.go-321-				JSONRPC: "2.0",
+    internal/gateway/server.go-322-				Error:   &JSONRPCError{Code: -32700, Message: "Parse error"},
+    --
+    internal/gateway/server.go:332:		_ = conn.SendJSON(s.handleRPCRequest(conn.ID, &req))
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-333-	}
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-334-}
+    --
+    internal/gateway/server.go:410:		_ = conn.SendJSON(invalidParams(req.ID))
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-411-		return
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-412-	}
+    --
+    internal/gateway/server.go:417:		_ = conn.SendJSON(missingParam(req.ID, "content"))
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-418-		return
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-419-	}
+    --
+    internal/gateway/server.go:429:		_ = conn.SendJSON(s.rpcAgentError(sess.ID, req.ID, "Failed to create agent session", err))
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-430-		return
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-431-	}
+    --
+    internal/gateway/server.go:439:		_ = conn.SendJSON(rpcErr)
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-440-		return
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-441-	}
+    --
+    internal/gateway/server.go:459:			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+    internal/gateway/server.go-460-				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
+    /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go-461-				cancel()
+    --
+    ... (19 more lines)
+
+[thinking] 现在我发现了几个重要的问题：
+           
+           1. **handleAskStream 的并发问题**：
+              - 在 `handleWSMessages` 的第 328 行调用 `s.handleAskStream(conn, &req)`
+              - 但这不是在 goroutine 中调用的，这意味着它会阻塞消息循环
+              - 如果一个用户发送了一个长时间运行的流请求，其他用户的消息（如 ping、其他请求）都会被阻塞
+              - 这是一个严重的并发问题
+           
+           2. **SetAgentSession 方法未使用且不安全**：
+              - 这个方法定义了但从未被调用
+              - 它直接修改 Session 而没有锁保护
+           
+           3. **agent session ID 的赋值错误**（之前已发现）
+           
+           4. **Session 的并发访问**：
+              - 虽然 Manager 的方法都有锁保护，但返回的是 clone
+              - 但是调用者可能会修改返回的 Session 对象
+           
+           让我检查一下 handleAskStream 是如何被调用的。
+现在我对代码进行了更深入的审查，发现了一些额外的严重问题。让我输出完整的审核报告：
+
+---
+
+## 审核报告
+
+### Issue
+- 编号: #6
+- 标题: feat: add web UI for sessions, streams, and tool activity
+- 迭代次数: 2
+
+---
+
+### 总体评价
+
+**评分: 7.5/10**
+
+实现基本符合需求，功能完整，但存在**严重的并发问题**和逻辑错误，需要修复后才能达到生产标准。
+
+---
+
+### 严重问题 (必须修复)
+
+#### 问题 1: handleAskStream 阻塞消息循环
+
+**位置**: `internal/gateway/server.go:328,407-497`
+
+**问题描述**:
+`handleAskStream` 在 `handleWSMessages` 中被直接调用（非 goroutine），这会阻塞整个消息循环。当一个客户端发送长时间运行的流请求时，该连接无法处理其他消息，甚至可能影响整个服务器的并发处理能力。
+
+**代码片段**:
+```go
+func (s *Server) handleWSMessages(conn *WSConnection) {
+    defer func() {
+        _ = conn.Close()
+        s.connectionsMu.Lock()
+        delete(s.connections, conn.ID)
+        s.connectionsMu.Unlock()
+    }()
+
+    for {
+        _, data, err := conn.ReadMessage()
+        if err != nil {
+            break
+        }
+        // ... 解析请求
+
+        if req.Method == "ask_stream" {
+            s.handleAskStream(conn, &req)  // 阻塞！长时间运行会阻塞整个循环
+            continue
+        }
+        // ...
+    }
+}
+```
+
+**建议修复**:
+```go
+if req.Method == "ask_stream" {
+    go s.handleAskStream(conn, &req)  // 在 goroutine 中运行
+    continue
+}
+```
+
+**原因**: 
+1. 流请求可能持续数分钟，期间该连接无法处理其他消息（如取消请求、心跳等）
+2. 违反了 WebSocket 消息处理的设计原则：消息循环应该快速返回
+3. 可能导致客户端无法及时响应服务器的其他消息
+
+---
+
+#### 问题 2: Agent Session ID 逻辑错误
+
+**位置**: `internal/gateway/server.go:502`
+
+**问题描述**:
+在 `ensureAgentSession` 函数中，将 ACPX 返回的 session ID 赋值错误，导致 AgentSession 字段失去意义。
+
+**代码片段**:
+```go
+id, err := ag.EnsureSession(context.Background(), sess.ID)
+if err != nil {
+    return "", err
+}
+sess.AgentSession = sess.ID  // Bug: 应该是 id，不是 sess.ID
+s.sessionMgr.Update(sess)
+```
+
+**建议修复**:
+```go
+id, err := ag.EnsureSession(context.Background(), sess.ID)
+if err != nil {
+    return "", err
+}
+sess.AgentSession = id  // 修复: 使用 ACPX 返回的 id
+s.sessionMgr.Update(sess)
+```
+
+**原因**: AgentSession 应该存储 ACPX agent 的 session ID，用于跟踪 agent 端的会话状态。当前实现导致该字段存储的是 Gateway session ID，使得字段失去意义。
+
+---
+
+#### 问题 3: SetAgentSession 方法存在但不安全且未使用
+
+**位置**: `internal/session/session.go:281-284`
+
+**问题描述**:
+定义了 `SetAgentSession` 方法但从未调用，且该方法直接修改 Session 而没有锁保护，存在并发安全风险。
+
+**代码片段**:
+```go
+// SetAgentSession sets the agent session ID.
+func (s *Session) SetAgentSession(agentSession string) {
+    s.AgentSession = agentSession  // 直接修改，无锁保护
+}
+```
+
+**建议修复**:
+```go
+// 方案 1: 如果不需要这个方法，直接删除
+// 方案 2: 如果需要，应该通过 Manager 的方法来修改
+func (m *Manager) SetAgentSession(channel, chatID, agentSession string) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    
+    sess, ok := m.sessions[SessionKey(channel, chatID)]
+    if ok {
+        sess.AgentSession = agentSession
+    }
+}
+```
+
+**原因**: 
+1. 未使用的方法增加代码复杂度
+2. 如果 Session 对象已经被 clone 返回给调用者，直接修改原对象可能导致数据不一致
+3. 违反了封装原则：所有 Session 修改都应该通过 Manager 进行
+
+---
+
+### 一般问题 (建议修复)
+
+#### 问题 4: 缺少 WebSocket 心跳机制
+
+**位置**: `internal/gateway/server.go:229-279`
+
+**问题描述**:
+WebSocket 连接没有心跳/pong 机制，无法及时检测半开连接（连接断开但未检测到）。
+
+**建议修复**:
+在 `handleWSMessages` 中添加 ping/pong 处理：
+```go
+func (s *Server) handleWSMessages(conn *WSConnection) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ticker.C:
+            if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+                return
+            }
+        default:
+            // 设置读取超时
+            conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+            _, data, err := conn.ReadMessage()
+            if err != nil {
+                return
+            }
+            // ... 处理消息
+        }
+    }
+}
+```
+
+**原因**: 长时间无消息的连接可能已经断开，心跳机制可以及时清理这些连接，释放资源。
+
+---
+
+#### 问题 5: 硬编码的 channel 参数
+
+**位置**: `internal/gateway/server.go:181,482,504,517,524,531,538,759,784,792`
+
+**问题描述**:
+多处使用硬编码的 `"cli"` 作为 channel 参数，与多 channel 设计不一致，限制了扩展性。
+
+**代码片段**:
+```go
+sess, ok := s.sessionMgr.Get("cli", sessionID)
+```
+
+**建议修复**:
+从 session 本身获取原始 channel：
+```go
+// 方案 1: 从 session 中获取
+if sess, ok := s.sessionMgr.Get("cli", sessionID); ok {
+    channel = sess.Channel
+    // 使用 channel 而不是 "cli"
+}
+
+// 方案 2: 在创建连接时记录 channel
+type WSConnection struct {
+    *websocket.Conn
+    ID      string
+    Channel string  // 添加 channel 字段
+    mu      sync.Mutex
+}
+```
+
+**原因**: 
+1. 如果需要支持多种 channel 类型（如 "web", "api", "cli"），需要修改多处代码
+2. 当前设计已经支持多 channel，但实现时没有充分利用
+
+---
+
+#### 问题 6: 缺少连接数限制
+
+**位置**: `internal/gateway/server.go:229-279`
+
+**问题描述**:
+没有限制 WebSocket 连接数，可能导致资源耗尽攻击。
+
+**建议修复**:
+```go
+const maxConnections = 1000
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+    s.connectionsMu.RLock()
+    if len(s.connections) >= maxConnections {
+        s.connectionsMu.RUnlock()
+        http.Error(w, "Too many connections", http.StatusServiceUnavailable)
+        return
+    }
+    s.connectionsMu.RUnlock()
+    
+    // ... 继续处理
+}
+```
+
+**原因**: 防止恶意客户端创建过多连接，耗尽服务器资源。
+
+---
+
+#### 问题 7: 测试未覆盖错误路径
+
+**位置**: `internal/gateway/server_ui_test.go`
+
+**问题描述**:
+测试只覆盖了正常情况，缺少错误情况测试。
+
+**建议增加**:
+```go
+func TestHandleSessionUpdateInvalidSession(t *testing.T) {
+    // 测试更新不存在的 session
+}
+
+func TestHandleSessionUpdateMissingParams(t *testing.T) {
+    // 测试缺少必要参数
+}
+
+func TestWebSocketAuthenticationFailure(t *testing.T) {
+    // 测试认证失败
+}
+```
+
+**原因**: 错误路径同样需要验证，确保代码健壮性。
+
+---
+
+### 建议改进 (可选)
+
+1. **拆分大文件**: `server.go` 有 843 行，建议拆分为：
+   - `server_handlers.go` - HTTP handlers
+   - `server_ws.go` - WebSocket 处理
+   - `server_rpc.go` - RPC 方法
+
+2. **优化克隆性能**: `cloneSession` 每次都深度复制 Activity，可以考虑：
+   - 使用 `sync.RWMutex` 保护 Session，避免克隆
+   - 或者只克隆必要的字段
+
+3. **添加请求超时**: `context.Background()` 应该替换为带超时的 context
+
+4. **改进日志**: 添加更详细的日志，包括请求 ID、客户端 IP 等
+
+5. **添加指标**: 添加 Prometheus 指标，监控连接数、消息数、错误率等
+
+---
+
+### 各维度评分
+
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 正确性 | 6/10 | 存在 agent session ID 错误和消息循环阻塞问题 |
+| 测试质量 | 8/10 | 测试覆盖基本充分，但缺少错误路径和并发测试 |
+| 代码质量 | 8/10 | 代码清晰，但有未使用方法，文件过大 |
+| 安全性 | 8/10 | 基本防护到位，但缺少连接限制和心跳 |
+| 性能 | 8/10 | 总体合理，但消息循环阻塞是严重问题 |
+
+**加权总分**: 6×0.35 + 8×0.25 + 8×0.20 + 8×0.10 + 8×0.10 = **7.5/10**
+
+---
+
+### 审核结论
+
+- [ ] 需要修改 - 存在必须修复的问题
+
+**下一步行动**:
+
+**必须修复**（阻塞发布）:
+1. **修复消息循环阻塞**: 将 `handleAskStream` 改为在 goroutine 中运行
+2. **修复 agent session ID 赋值**: 将 `sess.AgentSession = sess.ID` 改为 `sess.AgentSession = id`
+3. **删除或修复 SetAgentSession**: 删除未使用的方法，或改为通过 Manager 修改
+
+**建议修复**（提升质量）:
+4. 添加 WebSocket 心跳机制
+5. 消除硬编码的 "cli" channel
+6. 添加连接数限制
+7. 增加错误路径测试
+
+修复前 3 个问题后，预计评分可达 8.5 分以上，可以进入人工审核阶段。
+
+[done] end_turn

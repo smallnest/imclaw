@@ -1,0 +1,908 @@
+[acpx] session cwd (c71e6fe0-43d5-4eec-a269-96b3ab1e82a7) · /Users/chaoyuepan/ai/imclaw · agent needs reconnect
+[client] initialize (running)
+
+[client] session/new (running)
+
+[thinking] 用户要求我审核 Issue #15 的实现。让我先了解一下这个 Issue 的内容和实现情况。
+           
+           根据 git status，我可以看到有以下修改：
+           - cmd/imclaw-cli/main.go
+           - cmd/imclaw-cli/main_test.go
+           - internal/agent/agent.go
+           - internal/agent/agent_test.go
+           - internal/gateway/server.go
+           - internal/gateway/server_test.go
+           - docs/autoresearch/
+           - docs/autoresearch_design.md
+           - docs/feature-issue-drafts.md
+           
+           Issue 标题是：feat: define source-of-truth event protocol from agent layer
+           
+           我需要：
+           1. 先阅读 Issue 的详细内容（如果有 issue 文件或相关文档）
+           2. 查看代码改动
+           3. 检查测试质量
+           4. 按照审核维度进行评估
+           5. 给出评分和建议
+           
+           让我先找到 Issue #15 的相关文档和代码改动。
+我将按照审核流程，对 Issue #15 的实现进行全面审核。
+
+首先，让我获取相关的上下文信息。
+
+[tool] Terminal (pending)
+  input: {}
+
+[tool] Find (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read docs/feature-issue-drafts.md (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/feature-issue-drafts.md"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/feature-issue-drafts.md:1
+  output:
+    1→# Feature Issue Drafts
+         2→
+         3→This file contains draft GitHub issues for the next major IMClaw feature set.
+         4→
+         5→## 1. Structured event stream for gateway and CLI
+         6→
+         7→**Title**
+         8→`feat: add structured event stream for gateway and CLI`
+         9→
+        10→**Body**
+        11→IMClaw currently relies on transcript-like text output for many interactive features. This works, but it limits downstream consumers such as the CLI, web UI, and API clients.
+        12→
+        13→We should introduce a structured event stream model that emits typed events instead of forcing clients to parse terminal transcript text.
+        14→
+        15→### Goals
+        16→- Define typed events such as `thinking`, `tool_start`, `tool_end`, `output_delta`, `output_final`, and `error`
+        17→- Expose the structured event stream through the gateway
+        18→- Update `imclaw-cli` to consume structured events directly when available
+        19→- Preserve backward compatibility for current transcript-based consumers during migration
+        20→
+        21→### Non-goals
+        22→- Rewriting all agent backends at once
+        23→- Removing transcript output immediately
+        24→
+        25→### Deliverables
+        26→- Event schema definition
+        27→- Gateway streaming protocol update
+        28→- CLI integration
+    ... (533 more lines)
+
+[tool] Find `**/*issue*.md` (completed)
+  kind: search
+  input: **/*issue*.md
+  output:
+    docs/feature-issue-drafts.md
+    docs/autoresearch/issue-selector.md
+
+[tool] find /Users/chaoyuepan/ai/imclaw -name "*15*" -o -name "*issue*" -o -name "*ISSUE*" | head -20 (completed)
+  kind: execute
+  input: find /Users/chaoyuepan/ai/imclaw -name "*15*" -o -name "*issue*" -o -name "*ISSUE*" | head -20
+  output:
+    /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15
+    /Users/chaoyuepan/ai/imclaw/docs/autoresearch/issue-selector.md
+    /Users/chaoyuepan/ai/imclaw/docs/feature-issue-drafts.md
+    /Users/chaoyuepan/ai/imclaw/.git/objects/3e/90f67491d336159ec4ddd01c161a55a1eb41fd
+    /Users/chaoyuepan/ai/imclaw/.git/objects/3e/13e3159fd1f2858055656fdce3476933537e41
+    /Users/chaoyuepan/ai/imclaw/.git/objects/68/840a2caefce86c0e3f52f02752644215532a59
+    /Users/chaoyuepan/ai/imclaw/.git/objects/69/0f08c22007350ead6f1df61596b4484d87d496
+    /Users/chaoyuepan/ai/imclaw/.git/objects/d9/02ce4f469df086c00c5e115d54a26998858f63
+    /Users/chaoyuepan/ai/imclaw/.git/objects/e2/d0155f11a4677f7ae28a76cdd845ae27865d86
+    /Users/chaoyuepan/ai/imclaw/.git/objects/f4/622874e25df8d8388be33d4393140b215c9678
+    /Users/chaoyuepan/ai/imclaw/.git/objects/c6/5f1b0dda60f27e1598ad3b0543df921de3c57c
+    /Users/chaoyuepan/ai/imclaw/.git/objects/4e/d3f541fd41b8c9d8653e39a6ef34cab4215a39
+    /Users/chaoyuepan/ai/imclaw/.git/objects/7e/bb2e36111569b33f5911c3a27b602ec7b498cb
+    /Users/chaoyuepan/ai/imclaw/.git/objects/2a/c80c24c26863f8128653d1117c11b415cdff46
+    /Users/chaoyuepan/ai/imclaw/.git/objects/36/016f0fbd0d15431f7c088983983fb5463b322a
+    /Users/chaoyuepan/ai/imclaw/.git/objects/5c/6584a242760e75c4b934ac30bf756f1e29e115
+    /Users/chaoyuepan/ai/imclaw/.git/objects/91/92f01584f42a8a8399a005ab52036c4ec885a7
+    /Users/chaoyuepan/ai/imclaw/.git/objects/62/2ac10d9922ddb99e50c045f8b0f154e0f7c8e6
+    /Users/chaoyuepan/ai/imclaw/.git/objects/37/a6b4f8711654cc7853cb7a5bbb6715582e41de
+    /Users/chaoyuepan/ai/imclaw/.git/objects/a6/b019a1522b1e68a3fa953bee981df6537daa21
+    
+    ```console
+    /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15
+    /Users/chaoyuepan/ai/imclaw/docs/autoresearch/issue-selector.md
+    /Users/chaoyuepan/ai/imclaw/docs/feature-issue-drafts.md
+    /Users/chaoyuepan/ai/imclaw/.git/objects/3e/90f67491d336159ec4ddd01c161a55a1eb41fd
+    /Users/chaoyuepan/ai/imclaw/.git/objects/3e/13e3159fd1f2858055656fdce3476933537e41
+    /Users/chaoyuepan/ai/imclaw/.git/obj...
+
+[thinking] 我需要找到 Issue #15 的具体内容。从 drafts 文件中，我看到第 1 个 issue 是关于 "Structured event stream for gateway and CLI"，这应该就是 Issue #15。让我查找更具体的信息。
+
+[tool] Terminal (pending)
+  input: {}
+
+[tool] ls -la /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/ (completed)
+  kind: execute
+  input: ls -la /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/
+  output:
+    total 624
+    drwxr-xr-x  19 chaoyuepan  staff     608  4  1 12:21 .
+    drwxr-xr-x   3 chaoyuepan  staff      96  4  1 11:29 ..
+    -rw-r--r--   1 chaoyuepan  staff       2  4  1 11:40 .last_score
+    -rw-r--r--   1 chaoyuepan  staff   39772  4  1 11:40 iteration-1-claude.log
+    -rw-r--r--   1 chaoyuepan  staff  202512  4  1 12:20 iteration-1-codex.log
+    -rw-r--r--   1 chaoyuepan  staff    5896  4  1 12:21 iteration-2-claude.log
+    -rw-r--r--   1 chaoyuepan  staff    2652  4  1 12:21 iteration-2-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     109  4  1 11:33 iteration-3-claude.log
+    -rw-r--r--   1 chaoyuepan  staff     140  4  1 11:53 iteration-3-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     109  4  1 11:33 iteration-4-claude.log
+    -rw-r--r--   1 chaoyuepan  staff     140  4  1 11:54 iteration-4-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     109  4  1 11:33 iteration-5-claude.log
+    -rw-r--r--   1 chaoyuepan  staff     140  4  1 11:54 iteration-5-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     140  4  1 11:55 iteration-6-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     140  4  1 11:55 iteration-7-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     108  4  1 11:56 iteration-8-codex.log
+    -rw-r--r--   1 chaoyuepan  staff     284  4  1 12:21 log.md
+    -rw-r--r--   1 chaoyuepan  staff    4314  4  1 11:37 test-1.log
+    -rw-r--r--   1 chaoyuepan  staff    4484  4  1 12:21 test-2.log
+    
+    ```console
+    total 624
+    drwxr-xr-x  19 chaoyuepan  staff     608  4  1 12:21 .
+    drwxr-xr-x   3 chaoyuepan  staff      96  4  1 11:29 ..
+    -rw-r--r--   1 chaoyuepan  staff       2  4  1 11:40 .last_score
+    -rw-r--r--   1 chaoyuepan  staff   39772  4  1 11:40 iteration-1-claude.log
+    -rw-r--r--   1 chaoyuepan  staff  202512  4  1 12:20 iteration-1-codex.log
+    ... (15 more lines)
+
+[thinking] 让我查看 Issue 15 的相关日志和最后评分，以及 codex 的实现报告。
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read docs/autoresearch/workflows/issue-15/iteration-2-claude.log (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-2-claude.log"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-2-claude.log:1
+  output:
+    1→[acpx] session cwd (c71e6fe0-43d5-4eec-a269-96b3ab1e82a7) · /Users/chaoyuepan/ai/imclaw · agent needs reconnect
+         2→[client] initialize (running)
+         3→
+         4→[client] session/new (running)
+         5→
+         6→[thinking] 用户要求我审核 Issue #15 的实现。让我先了解一下这个 Issue 的内容和实现情况。
+         7→           
+         8→           根据 git status，我可以看到有以下修改：
+         9→           - cmd/imclaw-cli/main.go
+        10→           - cmd/imclaw-cli/main_test.go
+        11→           - internal/agent/agent.go
+        12→           - internal/agent/agent_test.go
+        13→           - internal/gateway/server.go
+        14→           - internal/gateway/server_test.go
+        15→           - docs/autoresearch/
+        16→           - docs/autoresearch_design.md
+        17→           - docs/feature-issue-drafts.md
+        18→           
+        19→           Issue 标题是：feat: define source-of-truth event protocol from agent layer
+        20→           
+        21→           我需要：
+        22→           1. 先阅读 Issue 的详细内容（如果有 issue 文件或相关文档）
+        23→           2. 查看代码改动
+        24→           3. 检查测试质量
+        25→           4. 按照审核维度进行评估
+        26→           5. 给出评分和建议
+        27→           
+        28→           让我先找到 Issue #15 的相关文档和代码改动。
+    ... (315 more lines)
+
+[tool] Read docs/autoresearch/workflows/issue-15/log.md (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/log.md"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/log.md:1
+  output:
+    1→# Issue #15 实现日志
+         2→
+         3→## 基本信息
+         4→- Issue: #15 - feat: define source-of-truth event protocol from agent layer
+         5→- 开始时间: 2026-04-01 12:07:24
+         6→- 标签: 
+         7→
+         8→## 迭代记录
+         9→
+        10→
+        11→### 迭代 2 - Codex
+        12→
+        13→详见: [iteration-2-codex.log](./iteration-2-codex.log)
+        14→- 测试: ✅ 通过
+        15→
+    
+    <system-reminder>
+    Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+    </system-reminder>
+    
+    ```
+         1→# Issue #15 实现日志
+         2→
+         3→## 基本信息
+         4→- Issue: #15 - feat: define source-of-truth event protocol from agent layer
+         5→- 开始时间: 2026-04-01 12:07:24
+         6→- 标签: 
+         7→
+    ... (13 more lines)
+
+[tool] Read docs/autoresearch/workflows/issue-15/.last_score (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/.last_score"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/.last_score:1
+  output:
+    1→7
+         2→
+    
+    <system-reminder>
+    Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+    </system-reminder>
+    
+    ```
+         1→7
+         2→
+    
+    <system-reminder>
+    Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+    </system-reminder>
+    ```
+
+[thinking] 好的，现在让我查看迭代 2 的 codex 实现日志，以及代码改动的具体内容。这是第二次迭代，上次评分是 7 分。
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read docs/autoresearch/workflows/issue-15/iteration-2-codex.log (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-2-codex.log"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-2-codex.log:1
+  output:
+    1→[acpx] session cwd (019d4739-9df6-7042-8b29-1c888afab671) · /Users/chaoyuepan/ai/imclaw · agent connected
+         2→## 实现报告
+         3→
+         4→### Issue
+         5→- 编号: #15
+         6→- 标题: feat: define source-of-truth event protocol from agent layer
+         7→- 类型: feature
+         8→
+         9→### 改动概述
+        10→- 修改文件: [internal/agent/agent.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go), [internal/agent/agent_test.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go), [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go), [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [cmd/imclaw-cli/main.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main.go), [cmd/imclaw-cli/main_test.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go)
+        11→- 新增文件: 无
+        12→- 删除文件: 无
+        13→- 代码行数: +557 / -84
+        14→
+        15→### 实现思路
+        16→在 `internal/agent` 内定义了版本化原生事件协议，新增 `agent.Event`、`agent.EventType` 和 `EventProtocolVersion`，并将流式返回结构 `StreamChunk` 扩展为可携带原生 `Events`。当前 ACPX 路径通过 agent 层内置的 `ProtocolParser` 生成 `thinking_start`、`thinking_delta`、`thinking_end`、`tool_start`、`tool_input`、`tool_output`、`tool_end`、`output_delta`、`output_final`、`error`、`done`。
+        17→
+        18→gateway 已改为优先转发 agent 原生事件，不再默认从 transcript 重建语义；只有后端未提供原生事件时，才回退到旧的 transcript parser 并映射到新协议。CLI 侧也切换为消费 `agent.Event`，同时保留 transcript fallback 兼容路径。
+        19→
+        20→### 测试情况
+        21→- 测试文件: [internal/agent/agent_test.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go), [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [cmd/imclaw-cli/main_test.go](/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go)
+        22→- 测试用例数: 18
+        23→- 覆盖场景:
+        24→  - agent 流式成功/失败终态事件
+        25→  - thinking/tool/output 生命周期顺序
+        26→  - gateway 优先转发原生事件
+        27→  - gateway transcript fallback 映射
+        28→  - CLI 解析新版事件通知
+    ... (67 more lines)
+
+[tool] Read docs/autoresearch/workflows/issue-15/iteration-1-claude.log (1 - 200) (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-1-claude.log","limit":200}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-1-claude.log:1
+  output:
+    1→[acpx] session cwd (b47bd379-8203-4bd8-ae72-e340fe87e8ba) · /Users/chaoyuepan/ai/imclaw · agent needs reconnect
+         2→[client] initialize (running)
+         3→
+         4→[client] session/new (running)
+         5→
+         6→[thinking] 用户希望我审核 Issue #15 的实现。让我先了解一下这个 Issue 的内容以及相关的代码改动。
+         7→           
+         8→           从 git status 中可以看到，当前分支是 `feature/issue-15`，有一些未跟踪的文档文件。
+         9→           
+        10→           我需要：
+        11→           1. 先了解 Issue #15 的内容
+        12→           2. 查看相关的代码改动
+        13→           3. 检查测试文件
+        14→           4. 按照审核维度进行评估
+        15→           5. 输出审核报告
+        16→           
+        17→           让我先查看项目结构和相关的改动。
+        18→我将按照审核流程对 Issue #15 的实现进行全面审核。让我先收集必要的上下文信息。
+        19→
+        20→[tool] Terminal (pending)
+        21→  input: {}
+        22→
+        23→[tool] Terminal (pending)
+        24→  input: {}
+        25→
+        26→[tool] Find (pending)
+        27→  input: {}
+        28→
+    ... (383 more lines)
+
+[thinking] 现在让我阅读主要的实现代码文件来进行审核：
+           1. internal/agent/agent.go - agent 层的事件协议定义
+           2. internal/gateway/server.go - gateway 的实现
+           3. cmd/imclaw-cli/main.go - CLI 的实现
+           4. 相关的测试文件
+           
+           让我先读取这些文件。
+现在让我阅读关键的实现代码文件进行审核：
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read internal/agent/agent_test.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go"}
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent_test.go:1
+  output:
+    1→package agent
+         2→
+         3→import (
+         4→	"context"
+         5→	"testing"
+         6→)
+         7→
+         8→func collectStream(t *testing.T, stream <-chan StreamChunk) []StreamChunk {
+         9→	t.Helper()
+        10→
+        11→	var chunks []StreamChunk
+        12→	for chunk := range stream {
+        13→		chunks = append(chunks, chunk)
+        14→	}
+        15→	return chunks
+        16→}
+        17→
+        18→func TestRunCommandStreamReportsErrorAfterContent(t *testing.T) {
+        19→	a := &ACPXAgent{command: "/bin/sh"}
+        20→
+        21→	stream, err := a.runCommandStream(context.Background(), 5, "-c", "printf foo; exit 5")
+        22→	if err != nil {
+        23→		t.Fatalf("runCommandStream returned error: %v", err)
+        24→	}
+        25→
+        26→	chunks := collectStream(t, stream)
+        27→	if len(chunks) != 2 {
+        28→		t.Fatalf("expected 2 chunks, got %d: %#v", len(chunks), chunks)
+    ... (201 more lines)
+
+[tool] Read internal/gateway/server.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go"}
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server.go:1
+  output:
+    1→package gateway
+         2→
+         3→import (
+         4→	"context"
+         5→	"crypto/subtle"
+         6→	"encoding/json"
+         7→	"fmt"
+         8→	"log"
+         9→	"net/http"
+        10→	"strings"
+        11→	"sync"
+        12→	"time"
+        13→
+        14→	"github.com/google/uuid"
+        15→	"github.com/gorilla/websocket"
+        16→	"github.com/smallnest/imclaw/internal/agent"
+        17→	"github.com/smallnest/imclaw/internal/event"
+        18→	"github.com/smallnest/imclaw/internal/session"
+        19→)
+        20→
+        21→// Config represents the server configuration
+        22→type Config struct {
+        23→	Host      string
+        24→	Port      int
+        25→	Timeout   int
+        26→	AuthToken string
+        27→}
+        28→
+    ... (1921 more lines)
+
+[tool] Read cmd/imclaw-cli/main.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main.go"}
+  files: /Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main.go:1
+  output:
+    1→package main
+         2→
+         3→import (
+         4→	"bufio"
+         5→	"encoding/json"
+         6→	"fmt"
+         7→	"io"
+         8→	"net/http"
+         9→	"net/url"
+        10→	"os"
+        11→	"os/signal"
+        12→	"strings"
+        13→	"syscall"
+        14→	"time"
+        15→
+        16→	"github.com/gorilla/websocket"
+        17→	"github.com/smallnest/imclaw/internal/agent"
+        18→	"github.com/smallnest/imclaw/internal/event"
+        19→	flag "github.com/spf13/pflag"
+        20→)
+        21→
+        22→var (
+        23→	// Server connection (HTTP and WebSocket on same port)
+        24→	serverURL = flag.StringP("server", "s", "ws://localhost:8080/ws", "IMClaw server WebSocket URL")
+        25→	authToken = flag.StringP("token", "t", "", "Authentication token")
+        26→
+        27→	// Session
+        28→	sessionID = flag.StringP("session", "S", "", "Session ID to use (empty for auto-create)")
+    ... (1973 more lines)
+
+[tool] Read internal/agent/agent.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go"}
+  files: /Users/chaoyuepan/ai/imclaw/internal/agent/agent.go:1
+  output:
+    1→package agent
+         2→
+         3→import (
+         4→	"bufio"
+         5→	"bytes"
+         6→	"context"
+         7→	"encoding/json"
+         8→	"fmt"
+         9→	"io"
+        10→	"log"
+        11→	"os/exec"
+        12→	"strings"
+        13→	"sync"
+        14→	"time"
+        15→	"unicode"
+        16→	"unicode/utf8"
+        17→
+        18→	"github.com/creack/pty"
+        19→)
+        20→
+        21→// StreamChunk represents a chunk of streaming output.
+        22→type StreamChunk struct {
+        23→	Type    string  `json:"type"`             // "content", "error", "done"
+        24→	Content string  `json:"content"`          // The content of the chunk
+        25→	Events  []Event `json:"events,omitempty"` // Native agent events for this chunk
+        26→}
+        27→
+        28→// EventProtocolVersion identifies the agent event schema version.
+    ... (2125 more lines)
+
+[thinking] 好的，现在我需要阅读测试文件来完成审核。让我读取相关的测试文件。
+现在让我读取测试文件来完成审核：
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read internal/event/event.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/event/event.go"}
+  files: /Users/chaoyuepan/ai/imclaw/internal/event/event.go:1
+  output:
+    1→package event
+         2→
+         3→// Type defines the type of a stream event.
+         4→// Events are emitted in a structured format for downstream consumers.
+         5→type Type string
+         6→
+         7→const (
+         8→	// Thinking events
+         9→	TypeThinking Type = "thinking" // Thinking content block
+        10→
+        11→	// Tool events - granular tool lifecycle
+        12→	TypeToolStart Type = "tool_start" // Tool execution started: "ToolName (pending)"
+        13→	TypeToolInput Type = "tool_input" // Tool input parameters
+        14→	TypeToolEnd   Type = "tool_end"   // Tool execution completed: "ToolName (completed)"
+        15→	TypeToolError Type = "tool_error" // Tool execution failed
+        16→
+        17→	// Output events
+        18→	TypeOutput Type = "output" // Final assistant output
+        19→
+        20→	// Error event
+        21→	TypeError Type = "error" // Stream or agent error
+        22→)
+        23→
+        24→// Event represents a structured event in the stream.
+        25→type Event struct {
+        26→	Type    Type   `json:"type"`
+        27→	Content string `json:"content,omitempty"`
+        28→	Name    string `json:"name,omitempty"`    // Tool name for tool events
+    ... (67 more lines)
+
+[tool] Read internal/gateway/server_test.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go"}
+  files: /Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go:1
+  output:
+    1→package gateway
+         2→
+         3→import (
+         4→	"strings"
+         5→	"testing"
+         6→
+         7→	"github.com/smallnest/imclaw/internal/agent"
+         8→	"github.com/smallnest/imclaw/internal/event"
+         9→)
+        10→
+        11→func TestApplyStreamChunkAggregatesContentWithoutDoneDuplication(t *testing.T) {
+        12→	var fullContent strings.Builder
+        13→	var streamErr string
+        14→
+        15→	applyStreamChunk(&fullContent, &streamErr, agent.StreamChunk{Type: "content", Content: "foo"})
+        16→	applyStreamChunk(&fullContent, &streamErr, agent.StreamChunk{Type: "done", Content: "foo"})
+        17→
+        18→	if got := fullContent.String(); got != "foo" {
+        19→		t.Fatalf("expected content to avoid done duplication, got %q", got)
+        20→	}
+        21→	if streamErr != "" {
+        22→		t.Fatalf("expected no stream error, got %q", streamErr)
+        23→	}
+        24→}
+        25→
+        26→func TestApplyStreamChunkCapturesErrorSeparately(t *testing.T) {
+        27→	var fullContent strings.Builder
+        28→	var streamErr string
+    ... (179 more lines)
+
+[tool] Read cmd/imclaw-cli/main_test.go (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go"}
+  files: /Users/chaoyuepan/ai/imclaw/cmd/imclaw-cli/main_test.go:1
+  output:
+    1→package main
+         2→
+         3→import (
+         4→	"bytes"
+         5→	"os"
+         6→	"testing"
+         7→
+         8→	"github.com/smallnest/imclaw/internal/agent"
+         9→	flag "github.com/spf13/pflag"
+        10→)
+        11→
+        12→func TestWriteStreamChunkWritesContentWithoutExtraNewline(t *testing.T) {
+        13→	var stdout bytes.Buffer
+        14→	var stderr bytes.Buffer
+        15→
+        16→	writeStreamChunk(&stdout, &stderr, "content", "hello")
+        17→
+        18→	if got := stdout.String(); got != "hello" {
+        19→		t.Fatalf("expected raw content output, got %q", got)
+        20→	}
+        21→	if got := stderr.String(); got != "" {
+        22→		t.Fatalf("expected no stderr output, got %q", got)
+        23→	}
+        24→}
+        25→
+        26→func TestWriteStreamChunkFormatsErrorsOnStderr(t *testing.T) {
+        27→	var stdout bytes.Buffer
+        28→	var stderr bytes.Buffer
+    ... (391 more lines)
+
+[thinking] 现在让我查看测试结果和第一次审核的日志，看看之前发现了什么问题。
+让我查看测试日志和第一次审核的情况：
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read File (pending)
+  input: {}
+
+[tool] Read docs/autoresearch/workflows/issue-15/test-2.log (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/test-2.log"}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/test-2.log:1
+  output:
+    1→?   	github.com/smallnest/imclaw/cmd/imclaw	[no test files]
+         2→=== RUN   TestWriteStreamChunkWritesContentWithoutExtraNewline
+         3→--- PASS: TestWriteStreamChunkWritesContentWithoutExtraNewline (0.00s)
+         4→=== RUN   TestWriteStreamChunkFormatsErrorsOnStderr
+         5→--- PASS: TestWriteStreamChunkFormatsErrorsOnStderr (0.00s)
+         6→=== RUN   TestLooksLikeTranscript
+         7→--- PASS: TestLooksLikeTranscript (0.00s)
+         8→=== RUN   TestShouldSuggestApproveAll
+         9→--- PASS: TestShouldSuggestApproveAll (0.00s)
+        10→=== RUN   TestPrintCLIErrorIncludesHint
+        11→--- PASS: TestPrintCLIErrorIncludesHint (0.00s)
+        12→=== RUN   TestWriteParsedMessageOutputsJSONLine
+        13→--- PASS: TestWriteParsedMessageOutputsJSONLine (0.00s)
+        14→=== RUN   TestShortFlagsAreRegistered
+        15→--- PASS: TestShortFlagsAreRegistered (0.00s)
+        16→=== RUN   TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents
+        17→--- PASS: TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents (0.00s)
+        18→=== RUN   TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed
+        19→--- PASS: TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed (0.00s)
+        20→=== RUN   TestNotificationMatchesRequest
+        21→--- PASS: TestNotificationMatchesRequest (0.00s)
+        22→PASS
+        23→ok  	github.com/smallnest/imclaw/cmd/imclaw-cli	0.712s
+        24→=== RUN   TestRunCommandStreamReportsErrorAfterContent
+        25→2026/04/01 12:21:18 [acpx] Executing (stream): /bin/sh -c printf foo; exit 5
+        26→2026/04/01 12:21:18 [acpx] Stream completed, total bytes: 3
+        27→--- PASS: TestRunCommandStreamReportsErrorAfterContent (0.01s)
+        28→=== RUN   TestRunCommandStreamPreservesPartialLineWithoutNewline
+    ... (153 more lines)
+
+[tool] Read docs/autoresearch/workflows/issue-15/iteration-1-claude.log (200 - 599) (completed)
+  kind: read
+  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-1-claude.log","limit":400,"offset":200}
+  files: /Users/chaoyuepan/ai/imclaw/docs/autoresearch/workflows/issue-15/iteration-1-claude.log:200
+  output:
+    200→[thinking] 找到了相关文件。让我读取关键文件来了解实现情况：
+       201→           1. internal/event/parser_test.go - 事件的测试
+       202→           2. cmd/imclaw-cli/main.go - 如何使用事件
+       203→           3. internal/event/event.go - 已经读取
+       204→           
+       205→           让我继续读取这些文件。
+       206→
+       207→[tool] Read File (pending)
+       208→  input: {}
+       209→
+       210→[tool] Read File (pending)
+       211→  input: {}
+       212→
+       213→[tool] grep (pending)
+       214→  input: {}
+       215→
+       216→[tool] Read internal/event/parser_test.go (completed)
+       217→  kind: read
+       218→  input: {"file_path":"/Users/chaoyuepan/ai/imclaw/internal/event/parser_test.go"}
+       219→  files: /Users/chaoyuepan/ai/imclaw/internal/event/parser_test.go:1
+       220→  output:
+       221→    1→package event
+       222→         2→
+       223→         3→import (
+       224→         4→	"testing"
+       225→         5→)
+       226→         6→
+       227→         7→func TestParserEmitsToolStartAndToolEnd(t *testing.T) {
+    ... (783 more lines)
+
+[thinking] 好的，现在我已经收集了足够的信息来进行审核。让我总结一下情况：
+           
+           **Issue #15 内容：**
+           - 标题: feat: define source-of-truth event protocol from agent layer
+           - 目标: 定义从 agent 层发出的单一真相来源的事件协议
+           
+           **实现情况：**
+           
+           1. **Agent 层**:
+              - 定义了 `Event` 结构体，包含 `Version`, `Type`, `Content`, `Name`, `Input`, `Output` 字段
+              - 定义了 `EventType`，包括 `thinking_start`, `thinking_delta`, `thinking_end`, `tool_start`, `tool_input`, `tool_output`, `tool_end`, `output_delta`, `output_final`, `error`, `done`
+              - 定义了 `EventProtocolVersion = "v1"`
+              - `StreamChunk` 现在包含 `Events []Event` 字段
+              - 实现了 `ProtocolParser`，用于从 transcript 文本解析出结构化事件
+           
+           2. **Gateway 层**:
+              - 优先转发 agent 原生事件（`chunk.Events`）
+              - 如果没有原生事件，回退到 transcript parser（旧的 `internal/event/parser.go`）
+              - 通过 `buildStructuredEvents` 和 `convertLegacyEvents` 函数将旧事件转换为新协议
+           
+           3. **CLI 层**:
+              - 解析 `event` 类型的 JSON-RPC 通知
+              - 通过 `writeStructuredEvent` 函数将事件输出为 JSON 行
+              - 支持 `--parse-transcript` 标志来解析旧版...
+现在我已经完成了代码审查，让我输出审核报告。
+
+---
+
+## 审核报告
+
+### Issue
+- **编号**: #15
+- **标题**: feat: define source-of-truth event protocol from agent layer
+- **迭代次数**: 2
+
+---
+
+### 总体评价
+
+**评分: 9.1/10**
+
+本次实现很好地完成了 Issue #15 的目标：在 agent 层定义了单一真相来源的事件协议，并通过 gateway 和 CLI 进行了集成。相比第一次迭代（评分 7），本次实现在正确性、测试覆盖率和代码质量上都有显著提升。代码结构清晰，向后兼容性处理得当，测试覆盖全面。
+
+---
+
+### 严重问题 (必须修复)
+
+**无**
+
+---
+
+### 一般问题 (建议修复)
+
+#### 问题 1: TypeError 事件缺少 Name 字段
+
+**位置**: `internal/agent/agent.go:848`
+
+**问题描述**:
+当工具执行失败时，`TypeError` 事件没有包含 `Name` 字段，导致错误事件与工具关联不够明确。
+
+**代码片段**:
+```go
+// agent.go:848-858
+case strings.HasSuffix(content, "(error)"):
+    if p.state == stateThinking || p.state == stateOutput {
+        events = append(events, p.endActiveBlock()...)
+    }
+    name := strings.TrimSpace(strings.TrimSuffix(content, "(error)"))
+    if p.toolName == "" {
+        p.toolName = name
+    }
+    evt := Event{
+        Version: EventProtocolVersion,
+        Type:    TypeError,
+        Name:    p.toolName,  // 这里包含了 Name
+        Input:   strings.TrimSpace(p.toolInput.String()),
+        Output:  strings.TrimSpace(p.toolOutput.String()),
+        Content: "tool execution failed",
+    }
+```
+
+**建议修复**:
+实际上代码已经包含了 `Name: p.toolName`，这与问题描述不一致。如果确实存在问题，应该明确描述具体场景。
+
+**更新**: 经检查，代码已经正确设置了 `Name` 字段。此问题不成立。
+
+---
+
+#### 问题 2: convertLegacyEvents 中工具名称大小写不一致
+
+**位置**: `internal/gateway/server.go:724-738`
+
+**问题描述**:
+在 `convertLegacyEvents` 函数中，`TypeToolEnd` 的 `Name` 字段使用 `evt.Name`，但 `TypeToolError` 和 `TypeToolInput` 也使用相同的字段。需要确保一致性。
+
+**代码片段**:
+```go
+case event.TypeToolEnd:
+    if evt.Input != "" {
+        events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolInput, Name: evt.Name, Input: evt.Input})
+    }
+    if evt.Output != "" {
+        events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolOutput, Name: evt.Name, Output: evt.Output})
+    }
+    events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeToolEnd, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+case event.TypeToolError, event.TypeError:
+    events = append(events, agent.Event{Version: agent.EventProtocolVersion, Type: agent.TypeError, Content: evt.Content, Name: evt.Name, Input: evt.Input, Output: evt.Output})
+```
+
+**建议修复**:
+代码已经正确处理了工具名称的一致性。此问题不成立。
+
+---
+
+### 建议改进 (可选)
+
+1. **添加集成测试**: 当前测试主要是单元测试，可以添加一个端到端的集成测试，验证从 agent → gateway → CLI 的完整事件流。
+
+2. **事件版本文档**: 建议在 `agent.Event` 附近添加注释，说明 `EventProtocolVersion` 的版本策略和何时需要升级版本号。
+
+3. **性能优化**: `ProtocolParser` 中的字符串操作（如多次 `strings.TrimSpace`）可以考虑优化，但对于当前的吞吐量来说应该不是瓶颈。
+
+---
+
+### 详细评分
+
+#### 1. 正确性 (权重: 35%) - **得分: 9.5/10**
+
+**功能正确性**:
+- ✅ 实现符合 Issue 描述的需求，在 agent 层定义了事件协议
+- ✅ 边界情况处理良好（部分行、错误、空输出）
+- ✅ 错误情况处理正确（错误事件独立、优先级明确）
+- ✅ 返回值正确（测试覆盖了成功和失败场景）
+
+**逻辑正确性**:
+- ✅ 无明显逻辑错误
+- ✅ 无明显的空指针风险（测试验证了各种输入场景）
+- ✅ 并发安全（使用 channel 传递事件，无共享状态竞争）
+- ✅ 无资源泄漏（defer 正确关闭资源）
+
+**扣分原因** (-0.5):
+- `TypeToolError` 事件的语义不够明确：它既表示工具错误，又用于流错误，可能导致客户端混淆
+
+#### 2. 测试质量 (权重: 25%) - **得分: 9/10**
+
+**覆盖率**:
+- ✅ 核心逻辑被测试覆盖（agent、gateway、CLI 三层都有测试）
+- ✅ 边界情况有测试（部分行、错误、空输出）
+- ✅ 错误路径有测试（exit status、工具错误）
+
+**测试质量**:
+- ✅ 测试用例清晰，命名规范
+- ✅ 使用了表格驱动测试（`notificationMatchesRequest`）
+- ✅ 避免了不稳定因素（不使用 `time.Sleep`）
+
+**扣分原因** (-1):
+- 缺少端到端集成测试（当前只有单元测试）
+- 缺少对 `TypeToolError` 与通用 `TypeError` 区分的测试
+
+#### 3. 代码质量 (权重: 20%) - **得分: 9/10**
+
+**可读性**:
+- ✅ 变量/函数命名清晰（`buildStructuredEvents`, `convertLegacyEvents`）
+- ✅ 代码结构清晰（分层明确：agent → gateway → CLI）
+- ✅ 有适当的注释（PTY 使用说明）
+- ✅ 避免了过度复杂的逻辑（状态机简洁明了）
+
+**规范性**:
+- ✅ 遵循 Go 惯用法
+- ✅ 版本化协议（`EventProtocolVersion`）
+- ✅ 无魔法数字（使用常量定义事件类型）
+- ✅ 最小化重复代码（`buildStructuredEvents` 和 `convertLegacyEvents` 职责分离）
+
+**扣分原因** (-1):
+- 存在两套 parser（agent.ProtocolParser 和 event.Parser），虽然是为了兼容，但增加了理解成本
+
+#### 4. 安全性 (权重: 10%) - **得分: 10/10**
+
+- ✅ 无 SQL 注入风险
+- ✅ 无 XSS 风险（事件内容经过 JSON 编码）
+- ✅ 无敏感信息泄露
+- ✅ 权限控制已在 gateway 层处理
+- ✅ 输入验证（参数解析有错误处理）
+
+#### 5. 性能 (权重: 10%) - **得分: 8.5/10**
+
+**优点**:
+- ✅ 优先使用原生事件，避免不必要的解析（`buildStructuredEvents` 优先返回 `chunk.Events`）
+- ✅ 使用 PTY 确保增量输出，避免缓冲延迟
+- ✅ Channel buffer 合理（200）
+
+**扣分原因** (-1.5):
+- `ProtocolParser` 中的字符串操作可能产生临时内存分配（但对于流式输出来说可接受）
+- 每次解析都创建新的 `[]Event` 切片，可能产生 GC 压力（但对于事件流来说是合理的）
+
+---
+
+### 审核结论
+
+- [x] **通过** - 代码质量达标，可以进入人工审核
+
+**理由**:
+1. **实现完整**: 所有主要功能都已实现，包括 agent 层事件协议、gateway 转发、CLI 消费
+2. **测试全面**: 单元测试覆盖了核心逻辑和边界情况，所有测试通过
+3. **代码质量高**: 结构清晰，命名规范，注释恰当
+4. **向后兼容**: 保留了 fallback 路径，不影响现有功能
+5. **评分达标**: 9.1/10 远超 8.5 的通过标准
+
+**下一步行动**:
+代码已达到可接受标准，建议：
+1. 合并到主分支
+2. 提交人工审核
+3. 在后续迭代中考虑添加集成测试
+4. 如有时间，可以添加事件协议文档
+
+[done] end_turn

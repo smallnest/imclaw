@@ -1,0 +1,82 @@
+?   	github.com/smallnest/imclaw/cmd/imclaw	[no test files]
+=== RUN   TestWriteStreamChunkWritesContentWithoutExtraNewline
+--- PASS: TestWriteStreamChunkWritesContentWithoutExtraNewline (0.00s)
+=== RUN   TestWriteStreamChunkFormatsErrorsOnStderr
+--- PASS: TestWriteStreamChunkFormatsErrorsOnStderr (0.00s)
+=== RUN   TestLooksLikeTranscript
+--- PASS: TestLooksLikeTranscript (0.00s)
+=== RUN   TestShouldSuggestApproveAll
+--- PASS: TestShouldSuggestApproveAll (0.00s)
+=== RUN   TestPrintCLIErrorIncludesHint
+--- PASS: TestPrintCLIErrorIncludesHint (0.00s)
+=== RUN   TestWriteParsedMessageOutputsJSONLine
+--- PASS: TestWriteParsedMessageOutputsJSONLine (0.00s)
+=== RUN   TestShortFlagsAreRegistered
+--- PASS: TestShortFlagsAreRegistered (0.00s)
+=== RUN   TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents
+--- PASS: TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents (0.00s)
+=== RUN   TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed
+--- PASS: TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed (0.00s)
+=== RUN   TestNotificationMatchesRequest
+--- PASS: TestNotificationMatchesRequest (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/cmd/imclaw-cli	(cached)
+=== RUN   TestRunCommandStreamReportsErrorAfterContent
+2026/04/01 09:56:50 [acpx] Executing (stream): /bin/sh -c printf foo; exit 5
+2026/04/01 09:56:50 [acpx] Stream completed, total bytes: 3
+--- PASS: TestRunCommandStreamReportsErrorAfterContent (0.01s)
+=== RUN   TestRunCommandStreamPreservesPartialLineWithoutNewline
+2026/04/01 09:56:50 [acpx] Executing (stream): /bin/sh -c printf partial
+2026/04/01 09:56:50 [acpx] Stream completed, total bytes: 7
+--- PASS: TestRunCommandStreamPreservesPartialLineWithoutNewline (0.01s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/agent	(cached)
+=== RUN   TestParserEmitsToolStartAndToolEnd
+--- PASS: TestParserEmitsToolStartAndToolEnd (0.00s)
+=== RUN   TestParserHandlesToolError
+--- PASS: TestParserHandlesToolError (0.00s)
+=== RUN   TestParserHandlesOutputBlocks
+--- PASS: TestParserHandlesOutputBlocks (0.00s)
+=== RUN   TestParserIncrementalFeeding
+    parser_test.go:156: After completion chunk: 0 events: []event.Event(nil)
+    parser_test.go:161: After newline and flush: 1 events: []event.Event{event.Event{Type:"tool_end", Content:"", Name:"Read", Input:"input: {\"path\": \"/tmp\"}", Output:"output: test"}}
+--- PASS: TestParserIncrementalFeeding (0.00s)
+=== RUN   TestParserIgnoresStatusMarkers
+--- PASS: TestParserIgnoresStatusMarkers (0.00s)
+=== RUN   TestParserStripsANSIEscapes
+--- PASS: TestParserStripsANSIEscapes (0.00s)
+=== RUN   TestParserTreatsUnknownBracketPrefixAsContent
+--- PASS: TestParserTreatsUnknownBracketPrefixAsContent (0.00s)
+=== RUN   TestEventIsTool
+--- PASS: TestEventIsTool (0.00s)
+=== RUN   TestEventIsTerminal
+--- PASS: TestEventIsTerminal (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/event	(cached)
+=== RUN   TestApplyStreamChunkAggregatesContentWithoutDoneDuplication
+--- PASS: TestApplyStreamChunkAggregatesContentWithoutDoneDuplication (0.00s)
+=== RUN   TestApplyStreamChunkCapturesErrorSeparately
+--- PASS: TestApplyStreamChunkCapturesErrorSeparately (0.00s)
+=== RUN   TestBuildStructuredEventsFromTranscriptChunks
+--- PASS: TestBuildStructuredEventsFromTranscriptChunks (0.00s)
+=== RUN   TestBuildStructuredEventsIncludesErrors
+--- PASS: TestBuildStructuredEventsIncludesErrors (0.00s)
+=== RUN   TestBuildStructuredEventsParsesToolLifecycle
+--- PASS: TestBuildStructuredEventsParsesToolLifecycle (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/gateway	(cached)
+?   	github.com/smallnest/imclaw/internal/session	[no test files]
+=== RUN   TestParseFullTranscript
+--- PASS: TestParseFullTranscript (0.00s)
+=== RUN   TestParseStripsANSIEscapes
+--- PASS: TestParseStripsANSIEscapes (0.00s)
+=== RUN   TestParseIgnoresStatusOnlyTranscript
+--- PASS: TestParseIgnoresStatusOnlyTranscript (0.00s)
+=== RUN   TestFeedParsesIncrementallyAcrossChunks
+--- PASS: TestFeedParsesIncrementallyAcrossChunks (0.00s)
+=== RUN   TestParseStreamClosesAfterFlush
+--- PASS: TestParseStreamClosesAfterFlush (0.00s)
+=== RUN   TestParseKeepsUnknownBracketPrefixAsContent
+--- PASS: TestParseKeepsUnknownBracketPrefixAsContent (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/transcript	(cached)

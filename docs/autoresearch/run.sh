@@ -1,0 +1,515 @@
+#!/bin/bash
+# autoresearch/run.sh - 自动化处理 GitHub Issue
+#
+# 用法:
+#   ./run.sh <issue_number> [max_iterations]
+#
+# 示例:
+#   ./run.sh 42           # 处理 Issue #42，使用默认迭代次数 42
+#   ./run.sh 42 10        # 处理 Issue #42，最多迭代 10 次
+#   ./run.sh 15 5         # 处理 Issue #15，最多迭代 5 次
+
+set -e
+
+# ==================== 环境变量处理 ====================
+# Codex 需要使用 OpenAI API，unset 自定义的 base URL 避免冲突
+# 如果你想使用自定义 API base，注释掉下面这行
+unset OPENAI_API_BASE 2>/dev/null || true
+
+# ==================== 配置 ====================
+DEFAULT_MAX_ITERATIONS=42
+PASSING_SCORE=8.5
+MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 脚本在 docs/autoresearch/，向上两级是项目根目录
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# ==================== 函数 ====================
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+error() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >&2
+}
+
+usage() {
+    echo "用法: $0 <issue_number> [max_iterations]"
+    echo ""
+    echo "参数:"
+    echo "  issue_number     GitHub Issue 编号"
+    echo "  max_iterations   最大迭代次数 (默认: $DEFAULT_MAX_ITERATIONS)"
+    echo ""
+    echo "配置:"
+    echo "  PASSING_SCORE=8.5              达标评分线"
+    echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
+    echo ""
+    echo "示例:"
+    echo "  $0 42            # 处理 Issue #42，使用默认迭代次数"
+    echo "  $0 42 10         # 处理 Issue #42，最多迭代 10 次"
+    exit 1
+}
+
+check_dependencies() {
+    log "检查依赖..."
+
+    local missing=0
+
+    if ! command -v gh &> /dev/null; then
+        error "gh (GitHub CLI) 未安装"
+        missing=1
+    fi
+
+    if ! command -v acpx &> /dev/null; then
+        error "acpx 未安装，请先安装 acpx"
+        missing=1
+    fi
+
+    if ! command -v go &> /dev/null; then
+        error "Go 未安装"
+        missing=1
+    fi
+
+    if [ $missing -eq 1 ]; then
+        exit 1
+    fi
+
+    log "依赖检查通过"
+}
+
+ensure_acpx_session() {
+    log "准备 acpx session..."
+
+    cd "$PROJECT_ROOT"
+
+    # 先关闭可能存在的旧 session（避免缓存旧配置）
+    log "关闭旧 session..."
+    acpx codex sessions close 2>/dev/null || true
+    acpx claude sessions close 2>/dev/null || true
+
+    sleep 1
+
+    # 创建新的 codex session
+    log "创建 codex session..."
+    acpx codex sessions new 2>&1
+
+    # 创建新的 claude session
+    log "创建 claude session..."
+    acpx claude sessions new 2>&1
+
+    log "acpx session 准备完成"
+}
+
+get_issue_info() {
+    local issue_number=$1
+
+    log "获取 Issue #$issue_number 信息..."
+
+    ISSUE_INFO=$(gh issue view $issue_number --json number,title,body,state,labels 2>&1)
+
+    if [ $? -ne 0 ]; then
+        error "无法获取 Issue #$issue_number: $ISSUE_INFO"
+        exit 1
+    fi
+
+    ISSUE_TITLE=$(echo "$ISSUE_INFO" | jq -r '.title')
+    ISSUE_BODY=$(echo "$ISSUE_INFO" | jq -r '.body')
+    ISSUE_STATE=$(echo "$ISSUE_INFO" | jq -r '.state')
+    ISSUE_LABELS=$(echo "$ISSUE_INFO" | jq -r '.labels[].name' | tr '\n' ',' | sed 's/,$//')
+
+    if [ "$ISSUE_STATE" != "OPEN" ]; then
+        error "Issue #$issue_number 状态为 $ISSUE_STATE，不是 OPEN"
+        exit 1
+    fi
+
+    log "Issue 标题: $ISSUE_TITLE"
+    log "Issue 标签: $ISSUE_LABELS"
+}
+
+setup_work_directory() {
+    local issue_number=$1
+
+    WORK_DIR="$SCRIPT_DIR/workflows/issue-$issue_number"
+    mkdir -p "$WORK_DIR"
+
+    log "工作目录: $WORK_DIR"
+
+    # 初始化日志文件
+    cat > "$WORK_DIR/log.md" << EOF
+# Issue #$issue_number 实现日志
+
+## 基本信息
+- Issue: #$issue_number - $ISSUE_TITLE
+- 开始时间: $(date '+%Y-%m-%d %H:%M:%S')
+- 标签: $ISSUE_LABELS
+
+## 迭代记录
+
+EOF
+}
+
+create_branch() {
+    local issue_number=$1
+
+    BRANCH_NAME="feature/issue-$issue_number"
+
+    log "创建分支: $BRANCH_NAME"
+
+    cd "$PROJECT_ROOT"
+
+    # 检查分支是否已存在
+    if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+        log "分支已存在，切换到: $BRANCH_NAME"
+        git checkout "$BRANCH_NAME"
+    else
+        git checkout -b "$BRANCH_NAME"
+    fi
+}
+
+run_codex() {
+    local issue_number=$1
+    local iteration=$2
+    local previous_feedback=$3
+
+    log "迭代 $iteration: Codex 实现..."
+
+    # 读取 codex.md 作为系统提示
+    local codex_instructions
+    codex_instructions=$(cat "$SCRIPT_DIR/agents/codex.md")
+
+    local prompt
+    if [ -z "$previous_feedback" ]; then
+        prompt="实现 GitHub Issue #$issue_number
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+Issue 内容: $ISSUE_BODY
+
+迭代次数: $iteration
+
+---
+请按照以下指令执行:
+$codex_instructions
+"
+    else
+        prompt="根据审核反馈改进 Issue #$issue_number 的实现
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+
+审核反馈:
+$previous_feedback
+
+---
+请按照以下指令执行:
+$codex_instructions
+"
+    fi
+
+    local log_file="$WORK_DIR/iteration-$iteration-codex.log"
+
+    # 使用 acpx codex
+    cd "$PROJECT_ROOT"
+    acpx codex "$prompt" 2>&1 | tee "$log_file"
+
+    # 检查是否有错误
+    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
+        error "Codex 执行失败，请检查日志: $log_file"
+        return 1
+    fi
+
+    # 检查是否有实际输出（不只是 acpx 状态信息）
+    local content_lines
+    content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
+    if [ "$content_lines" -lt 5 ]; then
+        log "警告: Codex 输出内容过少 ($content_lines 行)，可能执行失败"
+    fi
+
+    echo "" >> "$WORK_DIR/log.md"
+    echo "### 迭代 $iteration - Codex" >> "$WORK_DIR/log.md"
+    echo "" >> "$WORK_DIR/log.md"
+    echo "详见: [iteration-$iteration-codex.log](./iteration-$iteration-codex.log)" >> "$WORK_DIR/log.md"
+    return 0
+}
+
+run_tests() {
+    local iteration=$1
+
+    log "迭代 $iteration: 运行测试..."
+
+    cd "$PROJECT_ROOT"
+
+    local log_file="$WORK_DIR/test-$iteration.log"
+
+    # 检查是否有 Go 模块
+    if [ -f "go.mod" ]; then
+        if go test ./... -v 2>&1 | tee "$log_file"; then
+            log "测试通过"
+            echo "- 测试: ✅ 通过" >> "$WORK_DIR/log.md"
+            return 0
+        else
+            log "测试失败"
+            echo "- 测试: ❌ 失败" >> "$WORK_DIR/log.md"
+            return 1
+        fi
+    else
+        log "未找到 go.mod，跳过测试"
+        echo "- 测试: ⏭️ 跳过 (无 go.mod)" >> "$WORK_DIR/log.md"
+        return 0
+    fi
+}
+
+run_claude_review() {
+    local issue_number=$1
+    local iteration=$2
+
+    log "迭代 $iteration: Claude 审核..."
+
+    # 读取 claude.md 作为系统提示
+    local claude_instructions
+    claude_instructions=$(cat "$SCRIPT_DIR/agents/claude.md")
+
+    local prompt="审核 Issue #$issue_number 的实现
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+
+---
+请按照以下指令执行审核:
+$claude_instructions
+"
+
+    local log_file="$WORK_DIR/iteration-$iteration-claude.log"
+
+    cd "$PROJECT_ROOT"
+    local review_result
+    review_result=$(acpx claude "$prompt" 2>&1 | tee "$log_file")
+
+    # 检查是否有错误
+    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
+        error "Claude 执行失败，请检查日志: $log_file"
+        echo "0" > "$WORK_DIR/.last_score"
+        return 1
+    fi
+
+    # 提取评分 - 兼容 macOS (不使用 grep -P)，支持小数
+    local score=0
+
+    # 尝试多种格式匹配
+    # 格式1: 评分: X/10 或 Score: X/10 (支持小数如 8.5)
+    local score_line
+    score_line=$(echo "$review_result" | grep -E "评分:|Score:" | head -1)
+
+    if [ -n "$score_line" ]; then
+        # 提取数字（包括小数）
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+    fi
+
+    # 格式2: X/10 或 X.Y/10 格式
+    if [ -z "$score" ] || [ "$score" = "0" ]; then
+        score_line=$(echo "$review_result" | grep -E '[0-9]+\.?[0-9]*/10' | head -1)
+        if [ -n "$score_line" ]; then
+            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        fi
+    fi
+
+    # 格式3: **评分: X/10** markdown 格式
+    if [ -z "$score" ] || [ "$score" = "0" ]; then
+        score_line=$(echo "$review_result" | grep -E '\*\*评分' | head -1)
+        if [ -n "$score_line" ]; then
+            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        fi
+    fi
+
+    if [ -z "$score" ] || [ "$score" = "0" ]; then
+        log "警告: 无法从审核结果中提取评分，默认为 5"
+        score=5
+    fi
+
+    echo "- 审核评分: $score/10" >> "$WORK_DIR/log.md"
+
+    log "审核评分: $score/10"
+
+    echo "$review_result"
+    # 通过文件传递评分（避免 return 值限制）
+    echo "$score" > "$WORK_DIR/.last_score"
+    return 0
+}
+
+# 比较浮点数评分是否达标
+check_score_passed() {
+    local score=$1
+    local passing=$PASSING_SCORE
+
+    # 使用 awk 进行浮点数比较
+    awk -v score="$score" -v passing="$passing" 'BEGIN { exit (score >= passing) ? 0 : 1 }'
+}
+
+get_last_score() {
+    if [ -f "$WORK_DIR/.last_score" ]; then
+        cat "$WORK_DIR/.last_score"
+    else
+        echo "0"
+    fi
+}
+
+record_final_result() {
+    local issue_number=$1
+    local status=$2
+    local iterations=$3
+    local final_score=$4
+
+    cd "$PROJECT_ROOT"
+
+    local tests_passed="false"
+    if [ -f "go.mod" ] && go test ./... &> /dev/null; then
+        tests_passed="true"
+    fi
+
+    # 追加到 results.tsv
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+        "$(date -Iseconds)" \
+        "$issue_number" \
+        "$ISSUE_TITLE" \
+        "$status" \
+        "$iterations" \
+        "$tests_passed" \
+        "$final_score" \
+        "$final_score" \
+        "$BRANCH_NAME" \
+        "" >> "$SCRIPT_DIR/results.tsv"
+
+    # 更新日志
+    cat >> "$WORK_DIR/log.md" << EOF
+
+## 最终结果
+- 总迭代次数: $iterations
+- 最终评分: $final_score/10
+- 状态: $status
+- 分支: $BRANCH_NAME
+- 结束时间: $(date '+%Y-%m-%d %H:%M:%S')
+EOF
+}
+
+# ==================== 主流程 ====================
+
+if [ -z "$1" ]; then
+    usage
+fi
+
+ISSUE_NUMBER=$1
+MAX_ITERATIONS=${2:-$DEFAULT_MAX_ITERATIONS}
+
+log "=========================================="
+log "开始处理 Issue #$ISSUE_NUMBER"
+log "最大迭代次数: $MAX_ITERATIONS"
+log "=========================================="
+
+# 检查依赖
+check_dependencies
+
+# 获取 Issue 信息
+get_issue_info "$ISSUE_NUMBER"
+
+# 设置工作目录
+setup_work_directory "$ISSUE_NUMBER"
+
+# 确保 acpx session 存在
+ensure_acpx_session
+
+# 创建分支
+create_branch "$ISSUE_NUMBER"
+
+# 迭代循环
+ITERATION=0
+PREVIOUS_FEEDBACK=""
+FINAL_SCORE=0
+CONSECUTIVE_FAILURES=0
+
+while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+    ITERATION=$((ITERATION + 1))
+
+    log ""
+    log "=========================================="
+    log "迭代 $ITERATION/$MAX_ITERATIONS"
+    log "=========================================="
+
+    # Codex 实现/改进
+    if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$PREVIOUS_FEEDBACK"; then
+        CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+        log "Codex 执行失败 (连续失败: $CONSECUTIVE_FAILURES/$MAX_CONSECUTIVE_FAILURES)"
+
+        if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
+            error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
+            error "请检查 acpx codex 配置，可能的原因："
+            error "  1. API Key 未配置或无效"
+            error "  2. OPENAI_API_BASE 与 Codex 不兼容"
+            error "  3. 网络连接问题"
+            log ""
+            log "尝试运行: acpx --verbose codex exec 'hello' 查看详细错误"
+
+            record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
+            exit 1
+        fi
+
+        log "等待 10 秒后重试..."
+        sleep 10
+        continue
+    fi
+
+    # Codex 成功，重置连续失败计数
+    CONSECUTIVE_FAILURES=0
+
+    # 运行测试
+    if ! run_tests "$ITERATION"; then
+        PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+        continue
+    fi
+
+    # Claude 审核
+    run_claude_review "$ISSUE_NUMBER" "$ITERATION"
+    SCORE=$(get_last_score)
+
+    FINAL_SCORE=$SCORE
+
+    # 检查是否通过（支持小数评分）
+    if check_score_passed "$SCORE"; then
+        log "审核通过！评分: $SCORE/10 (达标线: $PASSING_SCORE)"
+
+        record_final_result "$ISSUE_NUMBER" "completed" "$ITERATION" "$SCORE"
+
+        echo ""
+        log "=========================================="
+        log "处理完成！"
+        log "=========================================="
+        log "分支: $BRANCH_NAME"
+        log "评分: $SCORE/10"
+        log "迭代次数: $ITERATION"
+        log ""
+        log "下一步: 请进行人工审核后手动提交"
+        log "  git diff main"
+        log "  go test ./..."
+        log "  git push origin $BRANCH_NAME"
+        log "  gh pr create --title 'feat: $ISSUE_TITLE (#$ISSUE_NUMBER)'"
+
+        exit 0
+    fi
+
+    log "评分未达标 ($SCORE/$PASSING_SCORE)，准备下一轮迭代..."
+
+    # 获取审核结果作为下次反馈
+    PREVIOUS_FEEDBACK=$(cat "$WORK_DIR/iteration-$ITERATION-claude.log")
+done
+
+# 达到最大迭代次数
+log ""
+log "=========================================="
+log "达到最大迭代次数，仍未通过审核"
+log "=========================================="
+log "最终评分: $FINAL_SCORE/10"
+log "请人工介入处理"
+
+record_final_result "$ISSUE_NUMBER" "blocked" "$ITERATION" "$FINAL_SCORE"
+
+exit 1

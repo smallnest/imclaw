@@ -1,0 +1,63 @@
+[acpx] session cwd (019d47ad-ea2d-72a3-b397-69794f4105fd) · /Users/chaoyuepan/ai/imclaw · agent connected
+## 反馈理解
+
+审核者提出以下问题：
+1. `ensureAgentSession` 中 `AgentSession` 的赋值语义不清晰。我的理解：这里不能直接把后续 prompt 切到 ACPX 返回的内部 id，因为当前 `internal/agent` 的调用契约仍然用稳定 session name 作为 `-s` 参数；但字段语义需要拆清。
+2. `server.go` 多处硬编码 `"cli"`。我的理解：应统一收敛到 helper/常量，并让 HTTP/JSON-RPC 支持显式传 channel。
+3. `server_ui_test.go` 缺少错误路径测试。我的理解：需要补 `session.update` 缺参、不存在 session、detail API 404 这类回归测试。
+
+我已按这个理解完成修改。
+
+## 改进报告
+
+### 已修复问题
+- `AgentSession` 语义混淆：在 [internal/session/session.go](/Users/chaoyuepan/ai/imclaw/internal/session/session.go) 新增 `AgentSessionID` 保存 ACPX 内部 id；[internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go#L510) 保留 `AgentSession` 作为后续 prompt 的稳定 handle，并补充注释说明。
+- 硬编码 channel：在 [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go#L171) 增加统一 channel helper，session detail API 支持查询参数 `channel`，JSON-RPC session 方法支持 params 中的 `channel`。
+- 错误路径测试：在 [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go) 增加了 `session.update` 缺少 `session_id`、更新不存在 session、detail API 404 的测试。
+
+### 未采纳建议
+- 直接将 `sess.AgentSession = id`：未采纳。原因是 [internal/agent/agent.go](/Users/chaoyuepan/ai/imclaw/internal/agent/agent.go) 当前通过 session name 继续发起 prompt；直接改成内部 id 会改变现有 agent 契约。当前通过新增 `AgentSessionID` 消除语义歧义，同时保持现有行为正确。
+
+### 新增改动
+- 增加默认 channel 常量，减少散落字符串字面量。
+- 会话详情查询可显式指定 `channel`。
+- 增加 ACPX internal id 的可观测字段。
+
+## 实现报告
+
+### Issue
+- 编号: #6
+- 标题: feat: add web UI for sessions, streams, and tool activity
+- 类型: feature
+
+### 改动概述
+- 修改文件: [internal/gateway/server.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server.go), [internal/session/session.go](/Users/chaoyuepan/ai/imclaw/internal/session/session.go), [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go)
+- 新增文件: 无
+- 删除文件: 无
+- 代码行数: +640 / -511
+
+### 实现思路
+这轮是针对审核反馈收口。核心是把 session 内的 agent 状态拆成“用于后续 prompt 的 handle”和“ACPX 返回的内部 id”两层，避免 `AgentSession` 字段语义错误，同时不破坏现有 ACPX 调用方式。其次把 channel 访问统一进 helper，减少 `"cli"` 散落。最后补足 session API 的错误路径测试，确保接口在异常场景下行为稳定。
+
+### 测试情况
+- 测试文件: [internal/gateway/server_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_test.go), [internal/gateway/server_ui_test.go](/Users/chaoyuepan/ai/imclaw/internal/gateway/server_ui_test.go), [internal/session/session_test.go](/Users/chaoyuepan/ai/imclaw/internal/session/session_test.go)
+- 测试用例数: 13
+- 覆盖场景:
+  - 结构化流事件与 transcript fallback
+  - sessions 列表与详情 API
+  - `session.update` 切换 agent
+  - `session.update` 缺少 `session_id`
+  - `session.update` 更新不存在 session
+  - detail API 404
+  - session 活动记录与摘要排序
+- 验证命令: `go test ./...`
+
+### 自评
+- 代码质量: 8/10
+- 测试覆盖: 9/10
+- 整体评分: 8/10
+
+### 待确认问题
+- 无
+
+[done] end_turn

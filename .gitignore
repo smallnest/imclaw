@@ -43,3 +43,9 @@ config.local.json
 
 # Keep docs for reference
 # docs/
+
+
+imclaw
+!imclaw/
+imclaw-cli
+!imclaw-cli/
