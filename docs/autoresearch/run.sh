@@ -4,10 +4,19 @@
 # 用法:
 #   ./run.sh <issue_number> [max_iterations]
 #
-# 示例:
-#   ./run.sh 42           # 处理 Issue #42，使用默认迭代次数 42
-#   ./run.sh 42 10        # 处理 Issue #42，最多迭代 10 次
-#   ./run.sh 15 5         # 处理 Issue #15，最多迭代 5 次
+# 在项目根目录执行:
+#   cd /path/to/your/github/project
+#   /path/to/run.sh 42           # 处理 Issue #42，使用默认迭代次数 42
+#   /path/to/run.sh 42 10        # 处理 Issue #42，最多迭代 10 次
+#
+# 要求:
+#   - 当前目录必须是 git 仓库
+#   - 当前目录必须有 GitHub remote (origin)
+#
+# 配置文件 (可选):
+#   在项目根目录创建 .autoresearch/ 目录，可以放置:
+#   - .autoresearch/agents/codex.md   自定义 Codex 指令
+#   - .autoresearch/agents/claude.md  自定义 Claude 指令
 
 set -e
 
@@ -20,9 +29,12 @@ unset OPENAI_API_BASE 2>/dev/null || true
 DEFAULT_MAX_ITERATIONS=42
 PASSING_SCORE=8.5
 MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
+
+# 脚本所在目录（用于查找默认 agents 配置）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 脚本在 docs/autoresearch/，向上两级是项目根目录
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# 项目根目录 = 当前工作目录
+PROJECT_ROOT="$(pwd)"
 
 # ==================== 函数 ====================
 
@@ -37,6 +49,8 @@ error() {
 usage() {
     echo "用法: $0 <issue_number> [max_iterations]"
     echo ""
+    echo "在 GitHub 项目根目录执行此脚本。"
+    echo ""
     echo "参数:"
     echo "  issue_number     GitHub Issue 编号"
     echo "  max_iterations   最大迭代次数 (默认: $DEFAULT_MAX_ITERATIONS)"
@@ -45,10 +59,42 @@ usage() {
     echo "  PASSING_SCORE=8.5              达标评分线"
     echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
     echo ""
+    echo "自定义配置文件 (可选):"
+    echo "  .autoresearch/agents/codex.md   Codex 指令"
+    echo "  .autoresearch/agents/claude.md  Claude 指令"
+    echo ""
     echo "示例:"
-    echo "  $0 42            # 处理 Issue #42，使用默认迭代次数"
+    echo "  cd /path/to/github/project"
+    echo "  $0 42            # 处理 Issue #42"
     echo "  $0 42 10         # 处理 Issue #42，最多迭代 10 次"
     exit 1
+}
+
+check_project() {
+    log "检查项目环境..."
+
+    # 检查是否是 git 仓库
+    if ! git rev-parse --is-inside-work-tree &> /dev/null; then
+        error "当前目录不是 git 仓库: $PROJECT_ROOT"
+        exit 1
+    fi
+
+    # 检查是否有 GitHub remote
+    local remote_url
+    remote_url=$(git remote get-url origin 2>/dev/null || true)
+
+    if [ -z "$remote_url" ]; then
+        error "未找到 git remote origin"
+        exit 1
+    fi
+
+    if ! echo "$remote_url" | grep -qE 'github\.com|github\.baidu\.com'; then
+        error "origin 不是 GitHub 仓库: $remote_url"
+        exit 1
+    fi
+
+    log "项目目录: $PROJECT_ROOT"
+    log "Git remote: $remote_url"
 }
 
 check_dependencies() {
@@ -130,7 +176,8 @@ get_issue_info() {
 setup_work_directory() {
     local issue_number=$1
 
-    WORK_DIR="$SCRIPT_DIR/workflows/issue-$issue_number"
+    # 工作目录在项目根目录下的 .autoresearch/
+    WORK_DIR="$PROJECT_ROOT/.autoresearch/workflows/issue-$issue_number"
     mkdir -p "$WORK_DIR"
 
     log "工作目录: $WORK_DIR"
@@ -147,6 +194,29 @@ setup_work_directory() {
 ## 迭代记录
 
 EOF
+}
+
+# 获取 agent 指令文件路径
+# 优先使用项目目录下的自定义文件，否则使用脚本目录下的默认文件
+get_agent_instructions() {
+    local agent_name=$1
+
+    # 优先级1: 项目目录下的自定义文件
+    local project_agent="$PROJECT_ROOT/.autoresearch/agents/$agent_name.md"
+    if [ -f "$project_agent" ]; then
+        echo "$project_agent"
+        return
+    fi
+
+    # 优先级2: 脚本目录下的默认文件
+    local default_agent="$SCRIPT_DIR/agents/$agent_name.md"
+    if [ -f "$default_agent" ]; then
+        echo "$default_agent"
+        return
+    fi
+
+    # 没有找到，返回空
+    echo ""
 }
 
 create_branch() {
@@ -174,9 +244,15 @@ run_codex() {
 
     log "迭代 $iteration: Codex 实现..."
 
-    # 读取 codex.md 作为系统提示
-    local codex_instructions
-    codex_instructions=$(cat "$SCRIPT_DIR/agents/codex.md")
+    # 获取 codex 指令文件
+    local codex_instructions_file
+    codex_instructions_file=$(get_agent_instructions "codex")
+
+    local codex_instructions=""
+    if [ -n "$codex_instructions_file" ]; then
+        codex_instructions=$(cat "$codex_instructions_file")
+        log "使用指令文件: $codex_instructions_file"
+    fi
 
     local prompt
     if [ -z "$previous_feedback" ]; then
@@ -266,9 +342,15 @@ run_claude_review() {
 
     log "迭代 $iteration: Claude 审核..."
 
-    # 读取 claude.md 作为系统提示
-    local claude_instructions
-    claude_instructions=$(cat "$SCRIPT_DIR/agents/claude.md")
+    # 获取 claude 指令文件
+    local claude_instructions_file
+    claude_instructions_file=$(get_agent_instructions "claude")
+
+    local claude_instructions=""
+    if [ -n "$claude_instructions_file" ]; then
+        claude_instructions=$(cat "$claude_instructions_file")
+        log "使用指令文件: $claude_instructions_file"
+    fi
 
     local prompt="审核 Issue #$issue_number 的实现
 
@@ -367,7 +449,8 @@ record_final_result() {
         tests_passed="true"
     fi
 
-    # 追加到 results.tsv
+    # 追加到 results.tsv (在项目目录下)
+    local results_file="$PROJECT_ROOT/.autoresearch/results.tsv"
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
         "$(date -Iseconds)" \
         "$issue_number" \
@@ -378,7 +461,7 @@ record_final_result() {
         "$final_score" \
         "$final_score" \
         "$BRANCH_NAME" \
-        "" >> "$SCRIPT_DIR/results.tsv"
+        "" >> "$results_file"
 
     # 更新日志
     cat >> "$WORK_DIR/log.md" << EOF
@@ -405,6 +488,9 @@ log "=========================================="
 log "开始处理 Issue #$ISSUE_NUMBER"
 log "最大迭代次数: $MAX_ITERATIONS"
 log "=========================================="
+
+# 检查项目环境
+check_project
 
 # 检查依赖
 check_dependencies
