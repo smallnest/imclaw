@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/creack/pty"
+	"github.com/smallnest/imclaw/internal/permission"
 )
 
 // StreamChunk represents a chunk of streaming output.
@@ -105,8 +106,14 @@ type PromptOptions struct {
 	// Model
 	Model string
 
+	// Permission preset
+	PermissionPreset string
+
 	// Allowed tools
 	AllowedTools string
+
+	// Denied tools
+	DeniedTools string
 
 	// Max turns
 	MaxTurns int
@@ -430,23 +437,63 @@ func (a *ACPXAgent) PromptStream(ctx context.Context, sessionID, prompt string, 
 }
 
 func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (string, error) {
-	// Build args in correct order: global options before agent type
-	// acpx [options] <agent> -s <session> <prompt>
+	policy, err := resolvePromptPolicy(opts)
+	if err != nil {
+		return "", err
+	}
+
+	args, timeout, format := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, false)
+
+	log.Printf("[acpx] Sending prompt to session %s (%s, format=%s)", sessionID, policy.Summary(), format)
+	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+
+	response, err := a.runCommand(ctx, timeout, args...)
+	if err != nil {
+		return "", fmt.Errorf("%s", annotatePermissionError(err.Error(), policy))
+	}
+	return response, nil
+}
+
+// doPromptStream executes the prompt and streams the output
+func (a *ACPXAgent) doPromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error) {
+	policy, err := resolvePromptPolicy(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	args, timeout, _ := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, true)
+
+	log.Printf("[acpx] Streaming prompt to session %s (%s)", sessionID, policy.Summary())
+	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+
+	return a.runCommandStream(ctx, timeout, policy, args...)
+}
+
+func resolvePromptPolicy(opts *PromptOptions) (*permission.ResolvedPolicy, error) {
+	if opts == nil {
+		opts = &PromptOptions{}
+	}
+	return permission.Resolve(permission.Policy{
+		PresetName:          opts.PermissionPreset,
+		Permissions:         opts.Permissions,
+		AllowedTools:        opts.AllowedTools,
+		DeniedTools:         opts.DeniedTools,
+		AuthPolicy:          opts.AuthPolicy,
+		NonInteractivePerms: opts.NonInteractivePerms,
+	})
+}
+
+func buildPromptArgs(agentType, sessionID, prompt string, opts *PromptOptions, policy *permission.ResolvedPolicy, streaming bool) ([]string, int, string) {
 	args := []string{}
 
-	// Working directory
 	if opts.Cwd != "" {
 		args = append(args, "--cwd", opts.Cwd)
 	}
-
-	// Auth policy
-	if opts.AuthPolicy != "" {
-		args = append(args, "--auth-policy", opts.AuthPolicy)
+	if policy.AuthPolicy != "" {
+		args = append(args, "--auth-policy", policy.AuthPolicy)
 	}
-
-	// Permission flags
-	if opts.Permissions != "" {
-		switch opts.Permissions {
+	if policy.Permissions != "" {
+		switch policy.Permissions {
 		case "approve-all":
 			args = append(args, "--approve-all")
 		case "approve-reads":
@@ -455,148 +502,58 @@ func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts
 			args = append(args, "--deny-all")
 		}
 	}
-
-	// Non-interactive permissions
-	if opts.NonInteractivePerms != "" {
-		args = append(args, "--non-interactive-permissions", opts.NonInteractivePerms)
+	if policy.NonInteractivePerms != "" {
+		args = append(args, "--non-interactive-permissions", policy.NonInteractivePerms)
 	}
 
-	// Format
 	format := opts.Format
 	if format == "" {
 		format = "text"
 	}
 	args = append(args, "--format", format)
 
-	// Suppress reads
 	if opts.SuppressReads {
 		args = append(args, "--suppress-reads")
 	}
-
-	// Model
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-
-	// Allowed tools
-	if opts.AllowedTools != "" {
-		args = append(args, "--allowed-tools", opts.AllowedTools)
+	if allowed := policy.AllowedToolsCSV(); allowed != "" {
+		args = append(args, "--allowed-tools", allowed)
 	}
-
-	// Max turns
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
-
-	// Prompt retries
 	if opts.PromptRetries > 0 {
 		args = append(args, "--prompt-retries", fmt.Sprintf("%d", opts.PromptRetries))
 	}
 
-	// Timeout
 	timeout := 300
 	if opts.Timeout > 0 {
 		timeout = opts.Timeout
 		args = append(args, "--timeout", fmt.Sprintf("%d", opts.Timeout))
 	}
-
-	// TTL
 	if opts.TTL > 0 {
 		args = append(args, "--ttl", fmt.Sprintf("%d", opts.TTL))
 	}
 
-	// Agent type and session
-	args = append(args, a.agentType, "-s", sessionID, prompt)
-
-	log.Printf("[acpx] Sending prompt to session %s (permissions=%s, format=%s)", sessionID, opts.Permissions, format)
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
-
-	return a.runCommand(ctx, timeout, args...)
+	args = append(args, agentType, "-s", sessionID, prompt)
+	return args, timeout, format
 }
 
-// doPromptStream executes the prompt and streams the output
-func (a *ACPXAgent) doPromptStream(ctx context.Context, sessionID, prompt string, opts *PromptOptions) (<-chan StreamChunk, error) {
-	// Build args in correct order: global options before agent type
-	args := []string{}
-
-	// Working directory
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
+func annotatePermissionError(message string, policy *permission.ResolvedPolicy) string {
+	if policy == nil {
+		return message
 	}
-
-	// Auth policy
-	if opts.AuthPolicy != "" {
-		args = append(args, "--auth-policy", opts.AuthPolicy)
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "permission") || strings.Contains(lower, "exit status 5") || strings.Contains(lower, "refused") {
+		return fmt.Sprintf("permission policy denied request (%s): %s", policy.Summary(), message)
 	}
-
-	// Permission flags
-	if opts.Permissions != "" {
-		switch opts.Permissions {
-		case "approve-all":
-			args = append(args, "--approve-all")
-		case "approve-reads":
-			args = append(args, "--approve-reads")
-		case "deny-all":
-			args = append(args, "--deny-all")
-		}
-	}
-
-	// Non-interactive permissions
-	if opts.NonInteractivePerms != "" {
-		args = append(args, "--non-interactive-permissions", opts.NonInteractivePerms)
-	}
-
-	// Format - always use text for streaming
-	args = append(args, "--format", "text")
-
-	// Suppress reads
-	if opts.SuppressReads {
-		args = append(args, "--suppress-reads")
-	}
-
-	// Model
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-
-	// Allowed tools
-	if opts.AllowedTools != "" {
-		args = append(args, "--allowed-tools", opts.AllowedTools)
-	}
-
-	// Max turns
-	if opts.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
-	}
-
-	// Prompt retries
-	if opts.PromptRetries > 0 {
-		args = append(args, "--prompt-retries", fmt.Sprintf("%d", opts.PromptRetries))
-	}
-
-	// Timeout
-	timeout := 300
-	if opts.Timeout > 0 {
-		timeout = opts.Timeout
-		args = append(args, "--timeout", fmt.Sprintf("%d", opts.Timeout))
-	}
-
-	// TTL
-	if opts.TTL > 0 {
-		args = append(args, "--ttl", fmt.Sprintf("%d", opts.TTL))
-	}
-
-	// Agent type and session
-	args = append(args, a.agentType, "-s", sessionID, prompt)
-
-	log.Printf("[acpx] Streaming prompt to session %s (permissions=%s)", sessionID, opts.Permissions)
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
-
-	return a.runCommandStream(ctx, timeout, args...)
+	return message
 }
 
 // runCommandStream executes command and streams the output
-func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...string) (<-chan StreamChunk, error) {
+func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, policy *permission.ResolvedPolicy, args ...string) (<-chan StreamChunk, error) {
 	if timeout == 0 {
 		timeout = 300
 	}
@@ -666,9 +623,10 @@ func (a *ACPXAgent) runCommandStream(ctx context.Context, timeout int, args ...s
 
 		// Send done or error (with context check to avoid deadlock)
 		if waitErr != nil {
-			events := append(flushEvents, Event{Version: EventProtocolVersion, Type: TypeError, Content: waitErr.Error()})
+			message := annotatePermissionError(waitErr.Error(), policy)
+			events := append(flushEvents, Event{Version: EventProtocolVersion, Type: TypeError, Content: message})
 			select {
-			case outputCh <- StreamChunk{Type: "error", Content: waitErr.Error(), Events: events}:
+			case outputCh <- StreamChunk{Type: "error", Content: message, Events: events}:
 			case <-ctx.Done():
 			}
 		} else {

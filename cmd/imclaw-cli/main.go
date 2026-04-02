@@ -150,6 +150,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Validate parse-transcript requires text format (it parses transcript output)
+	if *parseTranscript && *format != "text" {
+		fmt.Fprintf(os.Stderr, "Error: --parse-transcript requires --format text\n")
+		fmt.Fprintf(os.Stderr, "Note: --parse-transcript parses transcript output into structured events\n")
+		os.Exit(1)
+	}
+
 	// Get message from --prompt flag or remaining args
 	var message string
 	if *promptFlag != "" {
@@ -401,7 +408,7 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 		}
 	}
 
-	params, err := buildPromptParams(content, false)
+	params, err := buildPromptParams(content, true)
 	if err != nil {
 		return nil, err
 	}
@@ -569,26 +576,12 @@ func (c *Client) HTTPGet(path string) ([]byte, error) {
 }
 
 func writeStreamChunk(stdout, stderr io.Writer, chunkType, chunk string) {
-	switch *format {
-	case "json":
-		// Output as JSON line
-		evt := map[string]interface{}{
-			"type":    chunkType,
-			"content": chunk,
-		}
-		data, _ := json.Marshal(evt)
-		fmt.Fprintln(stdout, string(data))
-	case "quiet":
-		// Suppress output
-		if chunkType == "error" {
-			fmt.Fprintf(stderr, "[error] %s\n", chunk)
-		}
-	default: // "text"
-		if chunkType == "error" {
-			fmt.Fprintf(stderr, "[error] %s\n", chunk)
-		} else if chunkType == "content" {
-			fmt.Fprint(stdout, chunk)
-		}
+	// acpx already formats output based on --format flag
+	// Just pass through the content
+	if chunkType == "error" {
+		fmt.Fprintf(stderr, "[error] %s\n", chunk)
+	} else if chunkType == "content" {
+		fmt.Fprint(stdout, chunk)
 	}
 }
 
@@ -601,19 +594,6 @@ func looksLikeTranscript(content string) bool {
 }
 
 func printResponseContent(content string) {
-	if *format == "quiet" {
-		return
-	}
-
-	if *format == "json" {
-		evt := map[string]interface{}{
-			"type":    "output",
-			"content": content,
-		}
-		printJSON(evt)
-		return
-	}
-
 	if *parseTranscript && looksLikeTranscript(content) {
 		events := event.Parse(content)
 		printJSON(events)
@@ -691,13 +671,6 @@ func parseEventParams(params map[string]interface{}) agent.Event {
 }
 
 func writeStructuredEvent(stdout, stderr io.Writer, evt agent.Event) {
-	if *format == "quiet" {
-		if evt.Type == agent.TypeError {
-			fmt.Fprintf(stderr, "[error] %s\n", evt.Content)
-		}
-		return
-	}
-
 	if evt.Type == agent.TypeError {
 		fmt.Fprintf(stderr, "[error] %s\n", evt.Content)
 		return
