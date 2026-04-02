@@ -30,6 +30,19 @@ const els = {
 
 // ============ Utility Functions ============
 
+// Generate UUID (polyfill for non-HTTPS contexts)
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback: generate UUID v4
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 async function fetchJSON(url, options = {}) {
   const headers = options.headers || {};
   if (state.token) {
@@ -503,7 +516,7 @@ function rpc(method, params = {}) {
       reject(new Error('WebSocket is not connected'));
       return;
     }
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     state.pending.set(id, { resolve, reject, method });
     state.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
   });
