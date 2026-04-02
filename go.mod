@@ -1,6 +1,6 @@
 module github.com/smallnest/imclaw
 
-go 1.26.0
+go 1.23
 
 require (
 	github.com/creack/pty v1.1.24
