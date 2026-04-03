@@ -171,7 +171,7 @@ func parseTools(raw string) ([]string, error) {
 			continue
 		}
 		if !isKnownTool(tool) {
-			return nil, fmt.Errorf("unknown tool %q in permission policy", tool)
+			return nil, fmt.Errorf("unknown tool %q in permission policy (valid tools: %s)", tool, strings.Join(KnownTools(), ", "))
 		}
 		set[tool] = struct{}{}
 	}
