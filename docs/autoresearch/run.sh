@@ -15,15 +15,13 @@
 #
 # 配置文件 (可选):
 #   在项目根目录创建 .autoresearch/ 目录，可以放置:
-#   - .autoresearch/agents/codex.md   自定义 Codex 指令
+#   - .autoresearch/agents/gemini.md   自定义 Gemini 指令
 #   - .autoresearch/agents/claude.md  自定义 Claude 指令
 
 set -e
 
 # ==================== 环境变量处理 ====================
-# Codex 需要使用 OpenAI API，unset 自定义的 base URL 避免冲突
-# 如果你想使用自定义 API base，注释掉下面这行
-unset OPENAI_API_BASE 2>/dev/null || true
+# Gemini 使用 Google AI API，claude 使用 Anthropic API
 
 # ==================== 配置 ====================
 DEFAULT_MAX_ITERATIONS=42
@@ -60,7 +58,7 @@ usage() {
     echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
     echo ""
     echo "自定义配置文件 (可选):"
-    echo "  .autoresearch/agents/codex.md   Codex 指令"
+    echo "  .autoresearch/agents/gemini.md   Gemini 指令"
     echo "  .autoresearch/agents/claude.md  Claude 指令"
     echo ""
     echo "示例:"
@@ -131,14 +129,14 @@ ensure_acpx_session() {
 
     # 先关闭可能存在的旧 session（避免缓存旧配置）
     log "关闭旧 session..."
-    acpx codex sessions close 2>/dev/null || true
+    acpx gemini sessions close 2>/dev/null || true
     acpx claude sessions close 2>/dev/null || true
 
     sleep 1
 
-    # 创建新的 codex session
-    log "创建 codex session..."
-    acpx codex sessions new 2>&1
+    # 创建新的 gemini session
+    log "创建 gemini session..."
+    acpx gemini sessions new 2>&1
 
     # 创建新的 claude session
     log "创建 claude session..."
@@ -237,21 +235,21 @@ create_branch() {
     fi
 }
 
-run_codex() {
+run_gemini() {
     local issue_number=$1
     local iteration=$2
     local previous_feedback=$3
 
-    log "迭代 $iteration: Codex 实现..."
+    log "迭代 $iteration: Gemini 实现..."
 
-    # 获取 codex 指令文件
-    local codex_instructions_file
-    codex_instructions_file=$(get_agent_instructions "codex")
+    # 获取 gemini 指令文件
+    local gemini_instructions_file
+    gemini_instructions_file=$(get_agent_instructions "gemini")
 
-    local codex_instructions=""
-    if [ -n "$codex_instructions_file" ]; then
-        codex_instructions=$(cat "$codex_instructions_file")
-        log "使用指令文件: $codex_instructions_file"
+    local gemini_instructions=""
+    if [ -n "$gemini_instructions_file" ]; then
+        gemini_instructions=$(cat "$gemini_instructions_file")
+        log "使用指令文件: $gemini_instructions_file"
     fi
 
     local prompt
@@ -266,7 +264,7 @@ Issue 内容: $ISSUE_BODY
 
 ---
 请按照以下指令执行:
-$codex_instructions
+$gemini_instructions
 "
     else
         prompt="根据审核反馈改进 Issue #$issue_number 的实现
@@ -279,19 +277,19 @@ $previous_feedback
 
 ---
 请按照以下指令执行:
-$codex_instructions
+$gemini_instructions
 "
     fi
 
-    local log_file="$WORK_DIR/iteration-$iteration-codex.log"
+    local log_file="$WORK_DIR/iteration-$iteration-gemini.log"
 
-    # 使用 acpx codex
+    # 使用 acpx gemini
     cd "$PROJECT_ROOT"
-    acpx codex "$prompt" 2>&1 | tee "$log_file"
+    acpx gemini "$prompt" 2>&1 | tee "$log_file"
 
     # 检查是否有错误
     if grep -q "\[error\]" "$log_file" 2>/dev/null; then
-        error "Codex 执行失败，请检查日志: $log_file"
+        error "Gemini 执行失败，请检查日志: $log_file"
         return 1
     fi
 
@@ -299,13 +297,13 @@ $codex_instructions
     local content_lines
     content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
     if [ "$content_lines" -lt 5 ]; then
-        log "警告: Codex 输出内容过少 ($content_lines 行)，可能执行失败"
+        log "警告: Gemini 输出内容过少 ($content_lines 行)，可能执行失败"
     fi
 
     echo "" >> "$WORK_DIR/log.md"
-    echo "### 迭代 $iteration - Codex" >> "$WORK_DIR/log.md"
+    echo "### 迭代 $iteration - Gemini" >> "$WORK_DIR/log.md"
     echo "" >> "$WORK_DIR/log.md"
-    echo "详见: [iteration-$iteration-codex.log](./iteration-$iteration-codex.log)" >> "$WORK_DIR/log.md"
+    echo "详见: [iteration-$iteration-gemini.log](./iteration-$iteration-gemini.log)" >> "$WORK_DIR/log.md"
     return 0
 }
 
@@ -521,19 +519,18 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     log "迭代 $ITERATION/$MAX_ITERATIONS"
     log "=========================================="
 
-    # Codex 实现/改进
-    if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$PREVIOUS_FEEDBACK"; then
+    # Gemini 实现/改进
+    if ! run_gemini "$ISSUE_NUMBER" "$ITERATION" "$PREVIOUS_FEEDBACK"; then
         CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
-        log "Codex 执行失败 (连续失败: $CONSECUTIVE_FAILURES/$MAX_CONSECUTIVE_FAILURES)"
+        log "Gemini 执行失败 (连续失败: $CONSECUTIVE_FAILURES/$MAX_CONSECUTIVE_FAILURES)"
 
         if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
             error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
-            error "请检查 acpx codex 配置，可能的原因："
+            error "请检查 acpx gemini 配置，可能的原因："
             error "  1. API Key 未配置或无效"
-            error "  2. OPENAI_API_BASE 与 Codex 不兼容"
-            error "  3. 网络连接问题"
+            error "  2. 网络连接问题"
             log ""
-            log "尝试运行: acpx --verbose codex exec 'hello' 查看详细错误"
+            log "尝试运行: acpx --verbose gemini exec 'hello' 查看详细错误"
 
             record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
             exit 1
@@ -544,7 +541,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
         continue
     fi
 
-    # Codex 成功，重置连续失败计数
+    # Gemini 成功，重置连续失败计数
     CONSECUTIVE_FAILURES=0
 
     # 运行测试
