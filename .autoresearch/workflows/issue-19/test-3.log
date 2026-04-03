@@ -1,0 +1,262 @@
+?   	github.com/smallnest/imclaw/cmd/imclaw	[no test files]
+=== RUN   TestWriteStreamChunkWritesContentWithoutExtraNewline
+--- PASS: TestWriteStreamChunkWritesContentWithoutExtraNewline (0.00s)
+=== RUN   TestWriteStreamChunkFormatsErrorsOnStderr
+--- PASS: TestWriteStreamChunkFormatsErrorsOnStderr (0.00s)
+=== RUN   TestLooksLikeTranscript
+--- PASS: TestLooksLikeTranscript (0.00s)
+=== RUN   TestResolvePolicyFromFlagsUsesPresetAndDenies
+--- PASS: TestResolvePolicyFromFlagsUsesPresetAndDenies (0.00s)
+=== RUN   TestBuildPromptParamsIncludesPolicyFields
+--- PASS: TestBuildPromptParamsIncludesPolicyFields (0.00s)
+=== RUN   TestShouldSuggestApproveAll
+--- PASS: TestShouldSuggestApproveAll (0.00s)
+=== RUN   TestPrintCLIErrorIncludesHint
+--- PASS: TestPrintCLIErrorIncludesHint (0.00s)
+=== RUN   TestWriteParsedMessageOutputsJSONLine
+--- PASS: TestWriteParsedMessageOutputsJSONLine (0.00s)
+=== RUN   TestShortFlagsAreRegistered
+--- PASS: TestShortFlagsAreRegistered (0.00s)
+=== RUN   TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents
+--- PASS: TestHandleParsedResultFallsBackToFinalTranscriptWithoutStructuredEvents (0.00s)
+=== RUN   TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed
+--- PASS: TestHandleParsedResultSkipsTranscriptWhenStructuredEventsAlreadyStreamed (0.00s)
+=== RUN   TestNotificationMatchesRequest
+--- PASS: TestNotificationMatchesRequest (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/cmd/imclaw-cli	(cached)
+=== RUN   TestBuildPromptArgsUsesResolvedPolicy
+--- PASS: TestBuildPromptArgsUsesResolvedPolicy (0.00s)
+=== RUN   TestAnnotatePermissionErrorIncludesPolicySummary
+--- PASS: TestAnnotatePermissionErrorIncludesPolicySummary (0.00s)
+=== RUN   TestRunCommandStreamReportsErrorAfterContent
+2026/04/03 15:57:45 [acpx] Executing (stream): /bin/sh -c printf foo; exit 5
+2026/04/03 15:57:45 [acpx] Stream completed, total bytes: 3
+--- PASS: TestRunCommandStreamReportsErrorAfterContent (0.01s)
+=== RUN   TestRunCommandStreamPreservesPartialLineWithoutNewline
+2026/04/03 15:57:45 [acpx] Executing (stream): /bin/sh -c printf partial
+2026/04/03 15:57:45 [acpx] Stream completed, total bytes: 7
+--- PASS: TestRunCommandStreamPreservesPartialLineWithoutNewline (0.00s)
+=== RUN   TestProtocolParserEmitsToolLifecycleAndTerminalEvents
+--- PASS: TestProtocolParserEmitsToolLifecycleAndTerminalEvents (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/agent	(cached)
+=== RUN   TestParserEmitsToolStartAndToolEnd
+--- PASS: TestParserEmitsToolStartAndToolEnd (0.00s)
+=== RUN   TestParserHandlesToolError
+--- PASS: TestParserHandlesToolError (0.00s)
+=== RUN   TestParserHandlesOutputBlocks
+--- PASS: TestParserHandlesOutputBlocks (0.00s)
+=== RUN   TestParserIncrementalFeeding
+    parser_test.go:156: After completion chunk: 0 events: []event.Event(nil)
+    parser_test.go:161: After newline and flush: 1 events: []event.Event{event.Event{Type:"tool_end", Content:"", Name:"Read", Input:"input: {\"path\": \"/tmp\"}", Output:"output: test"}}
+--- PASS: TestParserIncrementalFeeding (0.00s)
+=== RUN   TestParserIgnoresStatusMarkers
+--- PASS: TestParserIgnoresStatusMarkers (0.00s)
+=== RUN   TestParserStripsANSIEscapes
+--- PASS: TestParserStripsANSIEscapes (0.00s)
+=== RUN   TestParserTreatsUnknownBracketPrefixAsContent
+--- PASS: TestParserTreatsUnknownBracketPrefixAsContent (0.00s)
+=== RUN   TestEventIsTool
+--- PASS: TestEventIsTool (0.00s)
+=== RUN   TestEventIsTerminal
+--- PASS: TestEventIsTerminal (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/event	(cached)
+=== RUN   TestParsePromptOptionsIncludesPermissionPolicyFields
+--- PASS: TestParsePromptOptionsIncludesPermissionPolicyFields (0.00s)
+=== RUN   TestApplyStreamChunkAggregatesContentWithoutDoneDuplication
+--- PASS: TestApplyStreamChunkAggregatesContentWithoutDoneDuplication (0.00s)
+=== RUN   TestApplyStreamChunkCapturesErrorSeparately
+--- PASS: TestApplyStreamChunkCapturesErrorSeparately (0.00s)
+=== RUN   TestFinalOutputShouldPreferStructuredOutputFinal
+--- PASS: TestFinalOutputShouldPreferStructuredOutputFinal (0.00s)
+=== RUN   TestBuildStructuredEventsPrefersNativeAgentEvents
+--- PASS: TestBuildStructuredEventsPrefersNativeAgentEvents (0.00s)
+=== RUN   TestBuildStructuredEventsFallsBackToTranscriptParser
+--- PASS: TestBuildStructuredEventsFallsBackToTranscriptParser (0.00s)
+=== RUN   TestBuildStructuredEventsIncludesFallbackErrors
+--- PASS: TestBuildStructuredEventsIncludesFallbackErrors (0.00s)
+=== RUN   TestEnsureAgentSessionStoresInternalIDAndHandle
+2026/04/03 17:16:56 [gateway] Created agent session, name=sess-ensure, acpx_id=acpx-123, request=req-1
+--- PASS: TestEnsureAgentSessionStoresInternalIDAndHandle (0.00s)
+=== RUN   TestSessionsAPIAndDetailIncludePersistedActivity
+--- PASS: TestSessionsAPIAndDetailIncludePersistedActivity (0.00s)
+=== RUN   TestHandleSessionUpdateChangesAgent
+--- PASS: TestHandleSessionUpdateChangesAgent (0.00s)
+=== RUN   TestHandleSessionUpdateMissingSessionID
+--- PASS: TestHandleSessionUpdateMissingSessionID (0.00s)
+=== RUN   TestHandleSessionUpdateMissingSession
+--- PASS: TestHandleSessionUpdateMissingSession (0.00s)
+=== RUN   TestHandleSessionDetailAPINotFound
+--- PASS: TestHandleSessionDetailAPINotFound (0.00s)
+=== RUN   TestHandleUIServesEmbeddedFrontend
+--- PASS: TestHandleUIServesEmbeddedFrontend (0.00s)
+=== RUN   TestHandleUIServesAssetWithCorrectMimeType
+=== RUN   TestHandleUIServesAssetWithCorrectMimeType//assets/app.js
+=== RUN   TestHandleUIServesAssetWithCorrectMimeType//assets/styles.css
+=== RUN   TestHandleUIServesAssetWithCorrectMimeType//assets/index.html
+--- PASS: TestHandleUIServesAssetWithCorrectMimeType (0.00s)
+    --- PASS: TestHandleUIServesAssetWithCorrectMimeType//assets/app.js (0.00s)
+    --- PASS: TestHandleUIServesAssetWithCorrectMimeType//assets/styles.css (0.00s)
+    --- PASS: TestHandleUIServesAssetWithCorrectMimeType//assets/index.html (0.00s)
+=== RUN   TestHandleUINoCacheInDevMode
+--- PASS: TestHandleUINoCacheInDevMode (0.00s)
+=== RUN   TestHandleUICacheHeadersInProduction
+--- PASS: TestHandleUICacheHeadersInProduction (0.00s)
+=== RUN   TestHandleBuildInfo
+--- PASS: TestHandleBuildInfo (0.00s)
+=== RUN   TestHandleUIAssetNotFound
+--- PASS: TestHandleUIAssetNotFound (0.00s)
+=== RUN   TestHandleUIAssetRejectsTraversal
+--- PASS: TestHandleUIAssetRejectsTraversal (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/gateway	(cached)
+=== RUN   TestNewJob
+--- PASS: TestNewJob (0.00s)
+=== RUN   TestJobStatusTransition_Valid
+=== RUN   TestJobStatusTransition_Valid/queued_to_running
+=== RUN   TestJobStatusTransition_Valid/queued_to_canceled
+=== RUN   TestJobStatusTransition_Valid/running_to_completed
+=== RUN   TestJobStatusTransition_Valid/running_to_failed
+=== RUN   TestJobStatusTransition_Valid/running_to_canceled
+=== RUN   TestJobStatusTransition_Valid/failed_to_queued_(retry)
+=== RUN   TestJobStatusTransition_Valid/completed_to_completed_(invalid)
+=== RUN   TestJobStatusTransition_Valid/running_to_queued_(invalid)
+--- PASS: TestJobStatusTransition_Valid (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/queued_to_running (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/queued_to_canceled (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/running_to_completed (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/running_to_failed (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/running_to_canceled (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/failed_to_queued_(retry) (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/completed_to_completed_(invalid) (0.00s)
+    --- PASS: TestJobStatusTransition_Valid/running_to_queued_(invalid) (0.00s)
+=== RUN   TestJobStatusTransition_UpdatesTimestamps
+=== RUN   TestJobStatusTransition_UpdatesTimestamps/running_sets_StartedAt
+=== RUN   TestJobStatusTransition_UpdatesTimestamps/completed_sets_FinishedAt
+=== RUN   TestJobStatusTransition_UpdatesTimestamps/failed_sets_FinishedAt
+=== RUN   TestJobStatusTransition_UpdatesTimestamps/canceled_sets_FinishedAt
+--- PASS: TestJobStatusTransition_UpdatesTimestamps (0.00s)
+    --- PASS: TestJobStatusTransition_UpdatesTimestamps/running_sets_StartedAt (0.00s)
+    --- PASS: TestJobStatusTransition_UpdatesTimestamps/completed_sets_FinishedAt (0.00s)
+    --- PASS: TestJobStatusTransition_UpdatesTimestamps/failed_sets_FinishedAt (0.00s)
+    --- PASS: TestJobStatusTransition_UpdatesTimestamps/canceled_sets_FinishedAt (0.00s)
+=== RUN   TestManagerSubmit
+--- PASS: TestManagerSubmit (0.00s)
+=== RUN   TestManagerGet
+=== RUN   TestManagerGet/existing_job
+=== RUN   TestManagerGet/non-existing_job
+--- PASS: TestManagerGet (0.00s)
+    --- PASS: TestManagerGet/existing_job (0.00s)
+    --- PASS: TestManagerGet/non-existing_job (0.00s)
+=== RUN   TestManagerList
+--- PASS: TestManagerList (0.02s)
+=== RUN   TestManagerSummaries
+--- PASS: TestManagerSummaries (0.00s)
+=== RUN   TestManagerStart
+--- PASS: TestManagerStart (0.00s)
+=== RUN   TestManagerComplete
+--- PASS: TestManagerComplete (0.00s)
+=== RUN   TestManagerFail
+--- PASS: TestManagerFail (0.00s)
+=== RUN   TestManagerCancel
+=== RUN   TestManagerCancel/cancel_queued_job
+=== RUN   TestManagerCancel/cancel_running_job
+--- PASS: TestManagerCancel (0.00s)
+    --- PASS: TestManagerCancel/cancel_queued_job (0.00s)
+    --- PASS: TestManagerCancel/cancel_running_job (0.00s)
+=== RUN   TestManagerAddLog
+--- PASS: TestManagerAddLog (0.00s)
+=== RUN   TestManagerDelete
+--- PASS: TestManagerDelete (0.00s)
+=== RUN   TestManagerDelete_RunningJob
+--- PASS: TestManagerDelete_RunningJob (0.00s)
+=== RUN   TestManagerCleanup
+--- PASS: TestManagerCleanup (0.00s)
+=== RUN   TestExecuteJob_Success
+--- PASS: TestExecuteJob_Success (0.10s)
+=== RUN   TestExecuteJob_Failure
+--- PASS: TestExecuteJob_Failure (0.10s)
+=== RUN   TestExecuteJob_Cancellation
+--- PASS: TestExecuteJob_Cancellation (0.31s)
+=== RUN   TestJobSummary
+--- PASS: TestJobSummary (0.00s)
+=== RUN   TestListDoesNotIncludeLogs
+--- PASS: TestListDoesNotIncludeLogs (0.00s)
+=== RUN   TestLogSizeLimit
+--- PASS: TestLogSizeLimit (0.00s)
+=== RUN   TestListSorting
+--- PASS: TestListSorting (0.05s)
+=== RUN   TestSummariesSorting
+--- PASS: TestSummariesSorting (0.05s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/job	(cached)
+=== RUN   TestResolvePresetAndDenyTools
+--- PASS: TestResolvePresetAndDenyTools (0.00s)
+=== RUN   TestResolveExplicitAllowOverridesPreset
+--- PASS: TestResolveExplicitAllowOverridesPreset (0.00s)
+=== RUN   TestResolveRejectsUnknownPreset
+--- PASS: TestResolveRejectsUnknownPreset (0.00s)
+=== RUN   TestResolveRejectsUnknownTool
+--- PASS: TestResolveRejectsUnknownTool (0.00s)
+=== RUN   TestAllowedToolsCSV
+=== RUN   TestAllowedToolsCSV/empty_tools
+=== RUN   TestAllowedToolsCSV/single_tool
+=== RUN   TestAllowedToolsCSV/multiple_tools
+--- PASS: TestAllowedToolsCSV (0.00s)
+    --- PASS: TestAllowedToolsCSV/empty_tools (0.00s)
+    --- PASS: TestAllowedToolsCSV/single_tool (0.00s)
+    --- PASS: TestAllowedToolsCSV/multiple_tools (0.00s)
+=== RUN   TestSummary
+=== RUN   TestSummary/basic_policy
+=== RUN   TestSummary/policy_with_preset
+=== RUN   TestSummary/policy_with_allowed_tools
+=== RUN   TestSummary/policy_with_denied_tools
+=== RUN   TestSummary/policy_with_all_fields
+--- PASS: TestSummary (0.00s)
+    --- PASS: TestSummary/basic_policy (0.00s)
+    --- PASS: TestSummary/policy_with_preset (0.00s)
+    --- PASS: TestSummary/policy_with_allowed_tools (0.00s)
+    --- PASS: TestSummary/policy_with_denied_tools (0.00s)
+    --- PASS: TestSummary/policy_with_all_fields (0.00s)
+=== RUN   TestSortedTools
+=== RUN   TestSortedTools/empty_slice
+=== RUN   TestSortedTools/already_sorted
+=== RUN   TestSortedTools/reverse_sorted
+=== RUN   TestSortedTools/unsorted
+--- PASS: TestSortedTools (0.00s)
+    --- PASS: TestSortedTools/empty_slice (0.00s)
+    --- PASS: TestSortedTools/already_sorted (0.00s)
+    --- PASS: TestSortedTools/reverse_sorted (0.00s)
+    --- PASS: TestSortedTools/unsorted (0.00s)
+=== RUN   TestResolveEmptyPreset
+--- PASS: TestResolveEmptyPreset (0.00s)
+=== RUN   TestResolveWithDuplicateTools
+--- PASS: TestResolveWithDuplicateTools (0.00s)
+=== RUN   TestResolveWithWhitespaceInTools
+--- PASS: TestResolveWithWhitespaceInTools (0.00s)
+=== RUN   TestResolveDenyAllAllowedTools
+--- PASS: TestResolveDenyAllAllowedTools (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/permission	(cached)
+=== RUN   TestManagerRecordsSessionActivity
+--- PASS: TestManagerRecordsSessionActivity (0.00s)
+=== RUN   TestSummariesSortedByLastActive
+--- PASS: TestSummariesSortedByLastActive (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/session	(cached)
+=== RUN   TestParseFullTranscript
+--- PASS: TestParseFullTranscript (0.00s)
+=== RUN   TestParseStripsANSIEscapes
+--- PASS: TestParseStripsANSIEscapes (0.00s)
+=== RUN   TestParseIgnoresStatusOnlyTranscript
+--- PASS: TestParseIgnoresStatusOnlyTranscript (0.00s)
+=== RUN   TestFeedParsesIncrementallyAcrossChunks
+--- PASS: TestFeedParsesIncrementallyAcrossChunks (0.00s)
+=== RUN   TestParseStreamClosesAfterFlush
+--- PASS: TestParseStreamClosesAfterFlush (0.00s)
+=== RUN   TestParseKeepsUnknownBracketPrefixAsContent
+--- PASS: TestParseKeepsUnknownBracketPrefixAsContent (0.00s)
+PASS
+ok  	github.com/smallnest/imclaw/internal/transcript	(cached)

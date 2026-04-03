@@ -3,10 +3,17 @@ package job
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+const (
+	// MaxLogEntries is the maximum number of log entries to keep per job.
+	// This prevents unbounded memory growth for long-running jobs.
+	MaxLogEntries = 1000
 )
 
 // JobStatus represents the current state of a job.
@@ -112,6 +119,13 @@ func (j *Job) addLog(level, message string) {
 		Level:     level,
 		Message:   message,
 	})
+
+	// Limit log entries to prevent unbounded memory growth.
+	// Keep only the most recent entries.
+	if len(j.Logs) > MaxLogEntries {
+		// Remove oldest entries (from the beginning)
+		j.Logs = j.Logs[len(j.Logs)-MaxLogEntries:]
+	}
 }
 
 // transitionStatus transitions the job to a new status if valid.
@@ -158,7 +172,7 @@ func (m *Manager) Submit(prompt, agentName string) *Job {
 	job.addLog("info", fmt.Sprintf("Job submitted: %s", job.ID))
 
 	// Return a copy to avoid race conditions
-	return m.cloneJob(job)
+	return m.cloneJob(job, true)
 }
 
 // Get retrieves a job by ID.
@@ -167,7 +181,7 @@ func (m *Manager) Get(id string) (*Job, bool) {
 	defer m.mu.RUnlock()
 
 	job, ok := m.jobs[id]
-	return m.cloneJob(job), ok
+	return m.cloneJob(job, true), ok // Include logs for Get()
 }
 
 // List lists all jobs ordered by creation time (newest first).
@@ -177,17 +191,13 @@ func (m *Manager) List() []*Job {
 
 	jobs := make([]*Job, 0, len(m.jobs))
 	for _, job := range m.jobs {
-		jobs = append(jobs, m.cloneJob(job))
+		jobs = append(jobs, m.cloneJob(job, false)) // Don't include logs for list operations
 	}
 
-	// Sort by CreatedAt descending
-	for i := 0; i < len(jobs); i++ {
-		for j := i + 1; j < len(jobs); j++ {
-			if jobs[i].CreatedAt.Before(jobs[j].CreatedAt) {
-				jobs[i], jobs[j] = jobs[j], jobs[i]
-			}
-		}
-	}
+	// Sort by CreatedAt descending using standard library (O(n log n))
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+	})
 
 	return jobs
 }
@@ -202,14 +212,10 @@ func (m *Manager) Summaries() []JobSummary {
 		summaries = append(summaries, job.Summary())
 	}
 
-	// Sort by CreatedAt descending
-	for i := 0; i < len(summaries); i++ {
-		for j := i + 1; j < len(summaries); j++ {
-			if summaries[i].CreatedAt.Before(summaries[j].CreatedAt) {
-				summaries[i], summaries[j] = summaries[j], summaries[i]
-			}
-		}
-	}
+	// Sort by CreatedAt descending using standard library (O(n log n))
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].CreatedAt.After(summaries[j].CreatedAt)
+	})
 
 	return summaries
 }
@@ -344,16 +350,22 @@ func (m *Manager) Cleanup(maxAge time.Duration) int {
 }
 
 // cloneJob creates a shallow copy of a job for safe external access.
-func (m *Manager) cloneJob(src *Job) *Job {
+// The includeLogs parameter controls whether to copy log entries.
+// This allows methods like List() to avoid copying potentially large log data.
+func (m *Manager) cloneJob(src *Job, includeLogs bool) *Job {
 	if src == nil {
 		return nil
 	}
 
 	dst := *src
-	// Copy logs to avoid concurrent writes
-	if len(src.Logs) > 0 {
+
+	// Only copy logs if explicitly requested (e.g., for Get()).
+	// For list operations, we skip log copying to avoid unnecessary memory usage.
+	if includeLogs && len(src.Logs) > 0 {
 		dst.Logs = make([]LogEntry, len(src.Logs))
 		copy(dst.Logs, src.Logs)
+	} else {
+		dst.Logs = nil
 	}
 
 	return &dst
