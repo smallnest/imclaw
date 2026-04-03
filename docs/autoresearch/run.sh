@@ -105,13 +105,8 @@ check_dependencies() {
         missing=1
     fi
 
-    if ! command -v gemini &> /dev/null; then
-        error "gemini 未安装，请先安装 gemini CLI"
-        missing=1
-    fi
-
-    if ! command -v claude &> /dev/null; then
-        error "claude 未安装，请先安装 claude CLI"
+    if ! command -v acpx &> /dev/null; then
+        error "acpx 未安装，请先安装 acpx"
         missing=1
     fi
 
@@ -125,6 +120,29 @@ check_dependencies() {
     fi
 
     log "依赖检查通过"
+}
+
+ensure_acpx_session() {
+    log "准备 acpx session..."
+
+    cd "$PROJECT_ROOT"
+
+    # 先关闭可能存在的旧 session（避免缓存旧配置）
+    log "关闭旧 session..."
+    acpx gemini sessions close 2>/dev/null || true
+    acpx claude sessions close 2>/dev/null || true
+
+    sleep 1
+
+    # 创建新的 gemini session
+    log "创建 gemini session..."
+    acpx gemini sessions new 2>&1
+
+    # 创建新的 claude session
+    log "创建 claude session..."
+    acpx claude sessions new 2>&1
+
+    log "acpx session 准备完成"
 }
 
 get_issue_info() {
@@ -265,19 +283,19 @@ $gemini_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-gemini.log"
 
-    # 直接调用 gemini 命令
+    # 使用 acpx gemini
     cd "$PROJECT_ROOT"
-    gemini "$prompt" 2>&1 | tee "$log_file"
+    acpx gemini "$prompt" 2>&1 | tee "$log_file"
 
-    # 检查退出码
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    # 检查是否有错误
+    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
         error "Gemini 执行失败，请检查日志: $log_file"
         return 1
     fi
 
-    # 检查是否有实际输出
+    # 检查是否有实际输出（不只是 acpx 状态信息）
     local content_lines
-    content_lines=$(grep -v "^$" "$log_file" | wc -l)
+    content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
     if [ "$content_lines" -lt 5 ]; then
         log "警告: Gemini 输出内容过少 ($content_lines 行)，可能执行失败"
     fi
@@ -346,10 +364,10 @@ $claude_instructions
 
     cd "$PROJECT_ROOT"
     local review_result
-    review_result=$(claude "$prompt" 2>&1 | tee "$log_file")
+    review_result=$(acpx claude "$prompt" 2>&1 | tee "$log_file")
 
-    # 检查退出码
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    # 检查是否有错误
+    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
         error "Claude 执行失败，请检查日志: $log_file"
         echo "0" > "$WORK_DIR/.last_score"
         return 1
@@ -481,6 +499,9 @@ get_issue_info "$ISSUE_NUMBER"
 # 设置工作目录
 setup_work_directory "$ISSUE_NUMBER"
 
+# 确保 acpx session 存在
+ensure_acpx_session
+
 # 创建分支
 create_branch "$ISSUE_NUMBER"
 
@@ -505,11 +526,11 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
         if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
             error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
-            error "请检查 gemini 配置，可能的原因："
+            error "请检查 acpx gemini 配置，可能的原因："
             error "  1. API Key 未配置或无效"
             error "  2. 网络连接问题"
             log ""
-            log "尝试运行: gemini 'hello' 查看详细错误"
+            log "尝试运行: acpx --verbose gemini exec 'hello' 查看详细错误"
 
             record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
             exit 1
