@@ -802,12 +802,62 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
         log "分支: $BRANCH_NAME"
         log "评分: $SCORE/10"
         log "迭代次数: $ITERATION"
+
+        # 自动提交 PR 并合并
         log ""
-        log "下一步: 请进行人工审核后手动提交"
-        log "  git diff main"
-        log "  go test ./..."
-        log "  git push origin $BRANCH_NAME"
-        log "  gh pr create --title 'feat: $ISSUE_TITLE (#$ISSUE_NUMBER)'"
+        log "=========================================="
+        log "自动提交 PR 并合并..."
+        log "=========================================="
+
+        cd "$PROJECT_ROOT"
+
+        # 提交所有更改
+        log "提交更改..."
+        git add -A
+        git commit -m "feat: implement issue #$ISSUE_NUMBER - $ISSUE_TITLE
+
+Implemented by autoresearch with score $SCORE/10 after $ITERATION iterations.
+
+Closes #$ISSUE_NUMBER" 2>/dev/null || log "没有需要提交的更改"
+
+        # 推送分支
+        log "推送分支 $BRANCH_NAME..."
+        git push -u origin "$BRANCH_NAME"
+
+        # 创建 PR
+        log "创建 Pull Request..."
+        PR_URL=$(gh pr create --title "feat: $ISSUE_TITLE (#$ISSUE_NUMBER)" --body "$(cat <<EOF
+## Summary
+- Implements #$ISSUE_NUMBER
+- Score: $SCORE/10
+- Iterations: $ITERATION
+
+## Test plan
+- [x] All tests pass
+- [x] Code review completed with score >= $PASSING_SCORE
+
+Closes #$ISSUE_NUMBER
+EOF
+)" 2>&1)
+
+        if echo "$PR_URL" | grep -q "https://github.com"; then
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+            log "PR 已创建: $PR_URL"
+
+            # 合并 PR
+            log "合并 PR #$PR_NUMBER..."
+            gh pr merge "$PR_NUMBER" --merge --delete-branch
+
+            log ""
+            log "=========================================="
+            log "完成！Issue #$ISSUE_NUMBER 已自动处理"
+            log "=========================================="
+            log "PR: $PR_URL"
+            log "状态: 已合并"
+        else
+            log "警告: PR 创建失败或已存在"
+            log "$PR_URL"
+        fi
 
         exit 0
     fi
