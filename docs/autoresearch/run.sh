@@ -21,16 +21,16 @@
 set -e
 
 # ==================== 环境变量处理 ====================
-# 加载用户环境变量（包括 OPENROUTER_API_KEY 等）
+# 加载必要的环境变量（API keys）
+# 不直接 source .zshrc，因为它可能包含交互式命令导致脚本退出
 if [ -f "$HOME/.zshrc" ]; then
-    source "$HOME/.zshrc" 2>/dev/null || true
-elif [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc" 2>/dev/null || true
+    # 只提取 API key 相关的环境变量
+    eval "$(grep -E '^export (OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=' "$HOME/.zshrc" 2>/dev/null)" || true
 fi
 
 # ==================== 配置 ====================
 DEFAULT_MAX_ITERATIONS=42
-PASSING_SCORE=8.5
+PASSING_SCORE=9.0
 MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
 MAX_RETRIES=10              # 退火重试最大次数
 RETRY_BASE_DELAY=2          # 退火重试初始等待时间（秒）
@@ -130,7 +130,7 @@ usage() {
     echo "  max_iterations   最大迭代次数 (默认: $DEFAULT_MAX_ITERATIONS)"
     echo ""
     echo "配置:"
-    echo "  PASSING_SCORE=8.5              达标评分线"
+    echo "  PASSING_SCORE=9.0              达标评分线"
     echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
     echo ""
     echo "自定义配置文件 (可选):"

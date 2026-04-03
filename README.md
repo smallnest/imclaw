@@ -457,7 +457,302 @@ Agent 请求执行操作
 | `/quit` | 退出 CLI |
 
 
-## 依赖
+## 后台任务 API
+
+IMClaw 支持后台任务（Job）执行，允许异步提交任务并查询状态。适用于长时间运行的 Agent 任务。
+
+### Job 状态
+
+| 状态 | 说明 |
+|------|------|
+| `queued` | 任务在队列中等待执行 |
+| `running` | 任务正在执行中 |
+| `completed` | 任务执行成功 |
+| `failed` | 任务执行失败 |
+| `canceled` | 任务被用户取消 |
+
+### REST API
+
+#### 提交任务
+
+```bash
+POST /api/jobs
+Content-Type: application/json
+
+{
+  "prompt": "帮我分析项目结构",
+  "agent": "codex"
+}
+```
+
+**响应：**
+```json
+{
+  "id": "019d527d-34ed-7272-b336-f67fd49024db",
+  "status": "queued",
+  "prompt": "帮我分析项目结构",
+  "agent_name": "codex",
+  "created_at": "2026-04-03T16:37:10Z"
+}
+```
+
+#### 查询任务状态
+
+```bash
+GET /api/jobs/{job_id}
+```
+
+**响应：**
+```json
+{
+  "id": "019d527d-34ed-7272-b336-f67fd49024db",
+  "status": "completed",
+  "prompt": "帮我分析项目结构",
+  "agent_name": "codex",
+  "created_at": "2026-04-03T16:37:10Z",
+  "started_at": "2026-04-03T16:37:12Z",
+  "finished_at": "2026-04-03T16:37:45Z",
+  "result": "项目结构分析结果...",
+  "logs": [
+    {"timestamp": "2026-04-03T16:37:10Z", "level": "info", "message": "Job submitted"},
+    {"timestamp": "2026-04-03T16:37:12Z", "level": "info", "message": "Job started"},
+    {"timestamp": "2026-04-03T16:37:45Z", "level": "info", "message": "Job completed successfully"}
+  ]
+}
+```
+
+#### 列出所有任务
+
+```bash
+GET /api/jobs
+```
+
+**响应：**
+```json
+{
+  "jobs": [
+    {
+      "id": "019d527d-34ed-7272-b336-f67fd49024db",
+      "status": "completed",
+      "prompt": "帮我分析项目结构",
+      "agent_name": "codex",
+      "created_at": "2026-04-03T16:37:10Z"
+    }
+  ]
+}
+```
+
+#### 取消任务
+
+```bash
+DELETE /api/jobs/{job_id}
+```
+
+### JSON-RPC API
+
+通过 WebSocket 连接使用 JSON-RPC 协议：
+
+#### 提交任务
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "job.submit",
+  "params": {
+    "prompt": "帮我分析项目结构",
+    "agent": "codex"
+  }
+}
+```
+
+#### 查询任务
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "job.get",
+  "params": {
+    "job_id": "019d527d-34ed-7272-b336-f67fd49024db"
+  }
+}
+```
+
+#### 列出任务
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "job.list"
+}
+```
+
+#### 取消任务
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "job.cancel",
+  "params": {
+    "job_id": "019d527d-34ed-7272-b336-f67fd49024db"
+  }
+}
+```
+
+#### 删除任务
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "job.delete",
+  "params": {
+    "job_id": "019d527d-34ed-7272-b336-f67fd49024db"
+  }
+}
+```
+
+### 使用示例
+
+#### curl 调用
+
+```bash
+# 提交任务
+JOB_ID=$(curl -s -X POST http://localhost:8080/api/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "分析项目结构", "agent": "codex"}' | jq -r '.id')
+
+echo "Job ID: $JOB_ID"
+
+# 查询状态
+curl -s http://localhost:8080/api/jobs/$JOB_ID | jq .
+
+# 取消任务
+curl -X DELETE http://localhost:8080/api/jobs/$JOB_ID
+```
+
+#### Python 调用
+
+```python
+import requests
+import time
+
+# 提交任务
+response = requests.post('http://localhost:8080/api/jobs', json={
+    'prompt': '分析项目结构',
+    'agent': 'codex'
+})
+job = response.json()
+job_id = job['id']
+print(f"Job ID: {job_id}")
+
+# 轮询等待完成
+while True:
+    response = requests.get(f'http://localhost:8080/api/jobs/{job_id}')
+    job = response.json()
+    status = job['status']
+    print(f"Status: {status}")
+
+    if status in ['completed', 'failed', 'canceled']:
+        break
+
+    time.sleep(2)
+
+# 获取结果
+if job['status'] == 'completed':
+    print("Result:", job['result'])
+else:
+    print("Error:", job.get('error', 'Unknown error'))
+```
+
+#### JavaScript 调用
+
+```javascript
+// WebSocket 连接
+const ws = new WebSocket('ws://localhost:8080/ws');
+
+ws.onopen = () => {
+  // 提交任务
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'job.submit',
+    params: {
+      prompt: '分析项目结构',
+      agent: 'codex'
+    }
+  }));
+};
+
+ws.onmessage = (event) => {
+  const response = JSON.parse(event.data);
+  console.log('Response:', response);
+
+  if (response.id === 1) {
+    const jobId = response.result.id;
+    // 定期查询状态
+    setInterval(() => {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'job.get',
+        params: { job_id: jobId }
+      }));
+    }, 2000);
+  }
+};
+```
+
+### Job 数据结构
+
+```go
+type Job struct {
+    ID         string     `json:"id"`
+    Status     JobStatus  `json:"status"`
+    Prompt     string     `json:"prompt"`
+    AgentName  string     `json:"agent_name"`
+    CreatedAt  time.Time  `json:"created_at"`
+    StartedAt  *time.Time `json:"started_at,omitempty"`
+    FinishedAt *time.Time `json:"finished_at,omitempty"`
+    Result     string     `json:"result,omitempty"`
+    Error      string     `json:"error,omitempty"`
+    Logs       []LogEntry `json:"logs,omitempty"`
+}
+
+type LogEntry struct {
+    Timestamp time.Time `json:"timestamp"`
+    Level     string    `json:"level"`
+    Message   string    `json:"message"`
+}
+```
+
+### 状态转换
+
+```
+         ┌─────────┐
+         │ queued  │
+         └────┬────┘
+              │
+    ┌─────────┼─────────┐
+    ▼         ▼         │
+┌────────┐ ┌────────┐   │
+│running │ │canceled│   │
+└───┬────┘ └────────┘   │
+    │                    │
+    ├─────────┬─────────┤
+    ▼         ▼         ▼
+┌──────────┐ ┌───────┐ ┌────────┐
+│completed │ │failed │ │canceled│
+└──────────┘ └───────┘ └────────┘
+              │
+              ▼ (允许重试)
+          ┌────────┐
+          │ queued │
+          └────────┘
+```
 
 - Go 1.25.0+
 - acpx (用于 ACP 协议支持)

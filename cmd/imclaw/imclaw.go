@@ -9,6 +9,7 @@ import (
 
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/gateway"
+	"github.com/smallnest/imclaw/internal/job"
 	"github.com/smallnest/imclaw/internal/session"
 	flag "github.com/spf13/pflag"
 )
@@ -61,6 +62,9 @@ func main() {
 	agentMgr := agent.NewManager()
 	defer agentMgr.Close()
 
+	// Create job manager
+	jobMgr := job.NewManager()
+
 	// Create and start gateway server
 	cfg := &gateway.Config{
 		Host:      *host,
@@ -69,7 +73,7 @@ func main() {
 		AuthToken: *authToken,
 		DevMode:   *devUI,
 	}
-	srv := gateway.NewServer(cfg, sessionMgr, agentMgr)
+	srv := gateway.NewServer(cfg, sessionMgr, agentMgr, jobMgr)
 	if err := srv.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start gateway: %v\n", err)
 		os.Exit(1)

@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/event"
+	"github.com/smallnest/imclaw/internal/job"
 	"github.com/smallnest/imclaw/internal/session"
 )
 
@@ -40,6 +41,7 @@ type Server struct {
 	config     *Config
 	sessionMgr *session.Manager
 	agentMgr   *agent.Manager
+	jobMgr     *job.Manager
 	uiHandler  *uiHandler
 
 	httpServer *http.Server
@@ -73,11 +75,12 @@ const (
 type StreamEvent = agent.Event
 
 // NewServer creates a new gateway server.
-func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager) *Server {
+func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager, jobMgr *job.Manager) *Server {
 	return &Server{
 		config:      cfg,
 		sessionMgr:  sessionMgr,
 		agentMgr:    agentMgr,
+		jobMgr:      jobMgr,
 		uiHandler:   newUIHandler(cfg != nil && cfg.DevMode),
 		connections: make(map[string]*WSConnection),
 	}
@@ -110,6 +113,8 @@ func (s *Server) startServer(ctx context.Context) {
 	mux.HandleFunc("/api/sessions", s.handleSessionsAPI)
 	mux.HandleFunc("/api/sessions/", s.handleSessionDetailAPI)
 	mux.HandleFunc("/api/agents", s.handleAgentsAPI)
+	mux.HandleFunc("/api/jobs", s.handleJobsAPI)
+	mux.HandleFunc("/api/jobs/", s.handleJobDetailAPI)
 	mux.HandleFunc("/rpc", s.handleJSONRPC)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/assets/", s.handleUIAssets)
@@ -290,6 +295,127 @@ func (s *Server) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		summaries := s.jobMgr.Summaries()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jobs":  summaries,
+			"count": len(summaries),
+		})
+	case http.MethodPost:
+		var req struct {
+			Prompt    string `json:"prompt"`
+			AgentName string `json:"agent_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "invalid request"})
+			return
+		}
+		if req.Prompt == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "prompt is required"})
+			return
+		}
+		if req.AgentName == "" {
+			req.AgentName = "acpx"
+		}
+
+		submittedJob := s.jobMgr.Submit(req.Prompt, req.AgentName)
+
+		// Start executing the job in background
+		go job.ExecuteJob(context.Background(), s.jobMgr, submittedJob.ID, s.executeJobPrompt)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(submittedJob)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleJobDetailAPI(w http.ResponseWriter, r *http.Request) {
+	jobID := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
+	if jobID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		job, ok := s.jobMgr.Get(jobID)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(job)
+	case http.MethodDelete:
+		if err := s.jobMgr.Delete(jobID); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	case http.MethodPost:
+		// Handle job actions (cancel, retry)
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		switch req.Action {
+		case "cancel":
+			if err := s.jobMgr.Cancel(jobID); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "unknown action"})
+		}
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// executeJobPrompt executes a job prompt using the agent manager
+func (s *Server) executeJobPrompt(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+	// Create a temporary session for this job
+	agentType := "acpx"
+	ag := s.agentMgr.GetOrCreate(agentType)
+
+	// Create a unique session ID for this job
+	sessionID := uuid.NewString()
+	agentSessionID, err := ag.EnsureSession(ctx, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create agent session: %w", err)
+	}
+
+	logFn("info", fmt.Sprintf("Started execution with agent: %s", agentType))
+
+	// Execute the prompt
+	response, err := ag.PromptWithOptions(ctx, agentSessionID, prompt, &agent.PromptOptions{
+		NonInteractivePerms: "allow",
+	})
+	if err != nil {
+		logFn("error", fmt.Sprintf("Execution failed: %v", err))
+		return "", err
+	}
+
+	logFn("info", "Execution completed successfully")
+	return response, nil
+}
+
 func (s *Server) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 	if s.config.AuthToken != "" && !s.authenticateHTTP(r) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -445,6 +571,16 @@ func (s *Server) handleRPCRequest(connID string, req *JSONRPCRequest) *JSONRPCRe
 		return s.handleSessionDelete(connID, req)
 	case "agents.list":
 		return s.handleAgentsList(connID, req)
+	case "job.submit":
+		return s.handleJobSubmit(connID, req)
+	case "job.get":
+		return s.handleJobGet(connID, req)
+	case "job.list":
+		return s.handleJobList(connID, req)
+	case "job.cancel":
+		return s.handleJobCancel(connID, req)
+	case "job.delete":
+		return s.handleJobDelete(connID, req)
 	default:
 		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "Method not found"}}
 	}
@@ -965,6 +1101,95 @@ func (s *Server) handleSessionDelete(connID string, req *JSONRPCRequest) *JSONRP
 func (s *Server) handleAgentsList(connID string, req *JSONRPCRequest) *JSONRPCResponse {
 	_ = connID
 	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"agents": s.agentMgr.List()}}
+}
+
+func (s *Server) handleJobSubmit(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+
+	prompt := getStringParam(params, "prompt")
+	agentName := getStringParam(params, "agent")
+	if prompt == "" {
+		return missingParam(req.ID, "prompt")
+	}
+	if agentName == "" {
+		agentName = "acpx"
+	}
+
+	submittedJob := s.jobMgr.Submit(prompt, agentName)
+
+	// Start executing the job in background
+	go job.ExecuteJob(context.Background(), s.jobMgr, submittedJob.ID, s.executeJobPrompt)
+
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: submittedJob}
+}
+
+func (s *Server) handleJobGet(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+
+	jobID := getStringParam(params, "job_id")
+	if jobID == "" {
+		return missingParam(req.ID, "job_id")
+	}
+
+	job, ok := s.jobMgr.Get(jobID)
+	if !ok {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: nil}
+	}
+
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: job}
+}
+
+func (s *Server) handleJobList(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	summaries := s.jobMgr.Summaries()
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"jobs": summaries}}
+}
+
+func (s *Server) handleJobCancel(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+
+	jobID := getStringParam(params, "job_id")
+	if jobID == "" {
+		return missingParam(req.ID, "job_id")
+	}
+
+	if err := s.jobMgr.Cancel(jobID); err != nil {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: err.Error()}}
+	}
+
+	job, _ := s.jobMgr.Get(jobID)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: job}
+}
+
+func (s *Server) handleJobDelete(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+
+	jobID := getStringParam(params, "job_id")
+	if jobID == "" {
+		return missingParam(req.ID, "job_id")
+	}
+
+	if err := s.jobMgr.Delete(jobID); err != nil {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: err.Error()}}
+	}
+
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"success": true}}
 }
 
 // SendJSON sends a JSON message.
