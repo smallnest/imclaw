@@ -21,11 +21,11 @@
 set -e
 
 # ==================== 环境变量处理 ====================
-# 加载用户环境变量（包括 OPENROUTER_API_KEY 等）
+# 加载必要的环境变量（API keys）
+# 不直接 source .zshrc，因为它可能包含交互式命令导致脚本退出
 if [ -f "$HOME/.zshrc" ]; then
-    source "$HOME/.zshrc" 2>/dev/null || true
-elif [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc" 2>/dev/null || true
+    # 只提取 API key 相关的环境变量
+    eval "$(grep -E '^export (OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=' "$HOME/.zshrc" 2>/dev/null)" || true
 fi
 
 # ==================== 配置 ====================
