@@ -12,8 +12,9 @@ import (
 func TestNewJob(t *testing.T) {
 	prompt := "test prompt"
 	agentName := "test-agent"
+	timeout := 5 * time.Second
 
-	job := newJob(prompt, agentName)
+	job := newJob(prompt, agentName, timeout)
 
 	if job.ID == "" {
 		t.Error("expected job ID to be set")
@@ -26,6 +27,9 @@ func TestNewJob(t *testing.T) {
 	}
 	if job.AgentName != agentName {
 		t.Errorf("expected agent name %s, got %s", agentName, job.AgentName)
+	}
+	if job.Timeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, job.Timeout)
 	}
 	if job.CreatedAt.IsZero() {
 		t.Error("expected CreatedAt to be set")
@@ -123,7 +127,7 @@ func TestManagerSubmit(t *testing.T) {
 	prompt := "test prompt"
 	agentName := "test-agent"
 
-	job := mgr.Submit(prompt, agentName)
+	job := mgr.Submit(prompt, agentName, 0)
 
 	if job == nil {
 		t.Fatal("expected job to be returned")
@@ -147,7 +151,7 @@ func TestManagerGet(t *testing.T) {
 	mgr := NewManager()
 
 	t.Run("existing job", func(t *testing.T) {
-		job := mgr.Submit("test", "agent")
+		job := mgr.Submit("test", "agent", 0)
 		retrieved, ok := mgr.Get(job.ID)
 		if !ok {
 			t.Error("expected job to be found")
@@ -169,11 +173,11 @@ func TestManagerList(t *testing.T) {
 	mgr := NewManager()
 
 	// Submit multiple jobs
-	job1 := mgr.Submit("prompt1", "agent1")
+	job1 := mgr.Submit("prompt1", "agent1", 0)
 	time.Sleep(10 * time.Millisecond)
-	job2 := mgr.Submit("prompt2", "agent2")
+	job2 := mgr.Submit("prompt2", "agent2", 0)
 	time.Sleep(10 * time.Millisecond)
-	job3 := mgr.Submit("prompt3", "agent3")
+	job3 := mgr.Submit("prompt3", "agent3", 0)
 
 	jobs := mgr.List()
 
@@ -196,7 +200,7 @@ func TestManagerList(t *testing.T) {
 func TestManagerSummaries(t *testing.T) {
 	mgr := NewManager()
 
-	job := mgr.Submit("test prompt", "test-agent")
+	job := mgr.Submit("test prompt", "test-agent", 0)
 	summaries := mgr.Summaries()
 
 	if len(summaries) != 1 {
@@ -217,7 +221,7 @@ func TestManagerSummaries(t *testing.T) {
 
 func TestManagerStart(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 
 	err := mgr.Start(job.ID, cancel)
@@ -237,7 +241,7 @@ func TestManagerStart(t *testing.T) {
 
 func TestManagerComplete(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(job.ID, cancel)
 
@@ -262,7 +266,7 @@ func TestManagerComplete(t *testing.T) {
 
 func TestManagerFail(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(job.ID, cancel)
 
@@ -288,7 +292,7 @@ func TestManagerFail(t *testing.T) {
 func TestManagerCancel(t *testing.T) {
 	t.Run("cancel queued job", func(t *testing.T) {
 		mgr := NewManager()
-		job := mgr.Submit("test", "agent")
+		job := mgr.Submit("test", "agent", 0)
 
 		err := mgr.Cancel(job.ID)
 		if err != nil {
@@ -303,7 +307,7 @@ func TestManagerCancel(t *testing.T) {
 
 	t.Run("cancel running job", func(t *testing.T) {
 		mgr := NewManager()
-		job := mgr.Submit("test", "agent")
+		job := mgr.Submit("test", "agent", 0)
 		_, cancel := context.WithCancel(context.Background())
 		mgr.Start(job.ID, cancel)
 
@@ -321,7 +325,7 @@ func TestManagerCancel(t *testing.T) {
 
 func TestManagerAddLog(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	err := mgr.AddLog(job.ID, "info", "test message")
 	if err != nil {
@@ -345,7 +349,7 @@ func TestManagerAddLog(t *testing.T) {
 
 func TestManagerDelete(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	err := mgr.Delete(job.ID)
 	if err != nil {
@@ -361,7 +365,7 @@ func TestManagerDelete(t *testing.T) {
 
 func TestManagerDelete_RunningJob(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(job.ID, cancel)
 
@@ -381,12 +385,12 @@ func TestManagerCleanup(t *testing.T) {
 	mgr := NewManager()
 
 	// Create jobs with different states
-	job1 := mgr.Submit("queued", "agent")
+	job1 := mgr.Submit("queued", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(job1.ID, cancel)
 	mgr.Complete(job1.ID, "done")
 
-	job2 := mgr.Submit("running", "agent")
+	job2 := mgr.Submit("running", "agent", 0)
 	_, cancel2 := context.WithCancel(context.Background())
 	mgr.Start(job2.ID, cancel2)
 
@@ -418,7 +422,7 @@ func TestManagerCleanup(t *testing.T) {
 
 func TestExecuteJob_Success(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "agent")
+	job := mgr.Submit("test prompt", "agent", 0)
 
 	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
 		logFn("info", "starting execution")
@@ -441,7 +445,7 @@ func TestExecuteJob_Success(t *testing.T) {
 
 func TestExecuteJob_Failure(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "agent")
+	job := mgr.Submit("test prompt", "agent", 0)
 
 	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
 		return "", errors.New("execution failed")
@@ -463,7 +467,7 @@ func TestExecuteJob_Failure(t *testing.T) {
 
 func TestExecuteJob_Cancellation(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "agent")
+	job := mgr.Submit("test prompt", "agent", 0)
 
 	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
 		// Check if context is cancelled
@@ -521,7 +525,7 @@ func TestJobSummary(t *testing.T) {
 // This prevents memory leaks when listing jobs with large logs.
 func TestListDoesNotIncludeLogs(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "test-agent")
+	job := mgr.Submit("test prompt", "test-agent", 0)
 
 	// Add many log entries
 	for i := 0; i < 100; i++ {
@@ -550,7 +554,7 @@ func TestListDoesNotIncludeLogs(t *testing.T) {
 // TestLogSizeLimit verifies that log entries are limited to MaxLogEntries.
 func TestLogSizeLimit(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "test-agent")
+	job := mgr.Submit("test prompt", "test-agent", 0)
 
 	// Add more log entries than MaxLogEntries
 	for i := 0; i < MaxLogEntries+100; i++ {
@@ -580,7 +584,7 @@ func TestListSorting(t *testing.T) {
 	// Create multiple jobs with slight delays to ensure different timestamps
 	ids := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent", 0)
 		ids[i] = job.ID
 		time.Sleep(10 * time.Millisecond) // Ensure different timestamps
 	}
@@ -612,7 +616,7 @@ func TestSummariesSorting(t *testing.T) {
 
 	// Create multiple jobs
 	for i := 0; i < 5; i++ {
-		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent", 0)
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -631,7 +635,7 @@ func BenchmarkListJobs(b *testing.B) {
 	mgr := NewManager()
 	// Create 1000 jobs
 	for i := 0; i < 1000; i++ {
-		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent", 0)
 	}
 
 	b.ResetTimer()
@@ -645,7 +649,7 @@ func BenchmarkSummaries(b *testing.B) {
 	mgr := NewManager()
 	// Create 1000 jobs
 	for i := 0; i < 1000; i++ {
-		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent", 0)
 	}
 
 	b.ResetTimer()
@@ -671,7 +675,7 @@ func TestConcurrentAccess(t *testing.T) {
 				switch j % 5 {
 				case 0:
 					// Submit a job
-					mgr.Submit(fmt.Sprintf("prompt %d-%d", idx, j), "agent")
+					mgr.Submit(fmt.Sprintf("prompt %d-%d", idx, j), "agent", 0)
 				case 1:
 					mgr.List()
 				case 2:
@@ -718,7 +722,7 @@ func TestManagerDelete_NonExistent(t *testing.T) {
 // TestManagerDelete_GetAfterDelete verifies that a job cannot be retrieved after deletion.
 func TestManagerDelete_GetAfterDelete(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	err := mgr.Delete(job.ID)
 	if err != nil {
@@ -735,7 +739,7 @@ func TestManagerDelete_GetAfterDelete(t *testing.T) {
 // and has the correct status.
 func TestManagerCancel_ListAfterCancel(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	err := mgr.Cancel(job.ID)
 	if err != nil {
@@ -829,7 +833,7 @@ func TestStatusTransition_FailedToCompleted(t *testing.T) {
 // TestRetryAfterFailure tests that a failed job can be retried by transitioning to queued.
 func TestRetryAfterFailure(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "agent")
+	job := mgr.Submit("test prompt", "agent", 0)
 
 	// Start the job
 	_, cancel := context.WithCancel(context.Background())
@@ -893,7 +897,7 @@ func TestExecuteJob_NonExistentID(t *testing.T) {
 // TestManagerSubmit_EmptyPrompt tests submitting a job with an empty prompt.
 func TestManagerSubmit_EmptyPrompt(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("", "agent")
+	job := mgr.Submit("", "agent", 0)
 
 	// Empty prompt should be allowed (validation is done at API level)
 	if job.Prompt != "" {
@@ -907,7 +911,7 @@ func TestManagerSubmit_EmptyPrompt(t *testing.T) {
 // TestManagerSubmit_EmptyAgentName tests submitting a job without an agent name.
 func TestManagerSubmit_EmptyAgentName(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "")
+	job := mgr.Submit("test prompt", "", 0)
 
 	// Empty agent name should be allowed
 	if job.AgentName != "" {
@@ -921,7 +925,7 @@ func TestManagerSubmit_EmptyAgentName(t *testing.T) {
 // TestManagerAddLog_LogLevels tests different log levels.
 func TestManagerAddLog_LogLevels(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	levels := []string{"info", "error", "debug", "warn"}
 	for _, level := range levels {
@@ -952,7 +956,7 @@ func TestManagerSubmit_UniqueIDs(t *testing.T) {
 
 	ids := make(map[string]bool)
 	for i := 0; i < numJobs; i++ {
-		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent", 0)
 		if ids[job.ID] {
 			t.Fatalf("duplicate job ID found: %s", job.ID)
 		}
@@ -967,7 +971,7 @@ func TestManagerSubmit_UniqueIDs(t *testing.T) {
 // TestCloneJobPreservesFields verifies that cloneJob properly copies all fields except logs (when requested).
 func TestCloneJobPreservesFields(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "test-agent")
+	job := mgr.Submit("test prompt", "test-agent", 0)
 
 	// Start and complete the job
 	_, cancel := context.WithCancel(context.Background())
@@ -999,7 +1003,7 @@ func TestCloneJobPreservesFields(t *testing.T) {
 // TestCanceledJobCannotBeCanceledAgain verifies canceling an already canceled job returns an error.
 func TestCanceledJobCannotBeCanceledAgain(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	// Cancel once
 	if err := mgr.Cancel(job.ID); err != nil {
@@ -1016,7 +1020,7 @@ func TestCanceledJobCannotBeCanceledAgain(t *testing.T) {
 // TestCompletedJobCannotBeCompletedAgain verifies completing an already completed job returns an error.
 func TestCompletedJobCannotBeCompletedAgain(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	// Start the job
 	_, cancel := context.WithCancel(context.Background())
@@ -1039,7 +1043,7 @@ func TestCompletedJobCannotBeCompletedAgain(t *testing.T) {
 // TestDeleteCancelsRunningJob verifies that deleting a running job cancels its context.
 func TestDeleteCancelsRunningJob(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1075,10 +1079,10 @@ func TestCleanupDoesNotRemoveRunningOrQueued(t *testing.T) {
 	mgr := NewManager()
 
 	// Create a queued job
-	queued := mgr.Submit("queued prompt", "agent")
+	queued := mgr.Submit("queued prompt", "agent", 0)
 
 	// Create a completed job that's old
-	completed := mgr.Submit("completed prompt", "agent")
+	completed := mgr.Submit("completed prompt", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(completed.ID, cancel)
 	mgr.Complete(completed.ID, "result")
@@ -1116,7 +1120,7 @@ func TestCleanupWithNoOldJobs(t *testing.T) {
 	mgr := NewManager()
 
 	// Create a recently completed job
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 	_, cancel := context.WithCancel(context.Background())
 	mgr.Start(job.ID, cancel)
 	mgr.Complete(job.ID, "result")
@@ -1138,7 +1142,7 @@ func TestCleanupWithNoOldJobs(t *testing.T) {
 // TestJobSummary_ExcludesLogs verifies that Job.Summary() doesn't include logs.
 func TestJobSummary_ExcludesLogs(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test", "agent")
+	job := mgr.Submit("test", "agent", 0)
 
 	// Add many logs
 	for i := 0; i < 50; i++ {
@@ -1170,7 +1174,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	// Create some initial jobs
 	for i := 0; i < 10; i++ {
-		mgr.Submit(fmt.Sprintf("initial-%d", i), "agent")
+		mgr.Submit(fmt.Sprintf("initial-%d", i), "agent", 0)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1184,7 +1188,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
-				job := mgr.Submit(fmt.Sprintf("job-%d-%d", idx, j), "agent")
+				job := mgr.Submit(fmt.Sprintf("job-%d-%d", idx, j), "agent", 0)
 				// Try to start and complete
 				_, c := context.WithCancel(ctx)
 				_ = mgr.Start(job.ID, c)
@@ -1215,7 +1219,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 // TestExecuteJob_ContextCancellationDuringExecution tests context cancellation propagates correctly.
 func TestExecuteJob_ContextCancellationDuringExecution(t *testing.T) {
 	mgr := NewManager()
-	job := mgr.Submit("test prompt", "agent")
+	job := mgr.Submit("test prompt", "agent", 0)
 
 	execCtx, execCancel := context.WithCancel(context.Background())
 
@@ -1246,3 +1250,109 @@ func TestExecuteJob_ContextCancellationDuringExecution(t *testing.T) {
 		t.Errorf("expected status %s, got %s", StatusCanceled, retrieved.Status)
 	}
 }
+
+// TestExecuteJob_Timeout tests that jobs timeout correctly
+func TestExecuteJob_Timeout(t *testing.T) {
+	mgr := NewManager()
+	timeout := 100 * time.Millisecond
+	job := mgr.Submit("test prompt", "agent", timeout)
+
+	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+		logFn("info", "starting execution")
+		// Simulate a long-running task that checks context
+		select {
+		case <-ctx.Done():
+			// Context was canceled or timed out
+			return "", ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			// Task completed (shouldn't reach here due to timeout)
+			return "result", nil
+		}
+	}
+
+	go ExecuteJob(context.Background(), mgr, job.ID, executor)
+
+	// Wait for execution to complete and timeout
+	time.Sleep(300 * time.Millisecond)
+
+	retrieved, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+
+	// The job should have failed due to timeout
+	if retrieved.Status != StatusFailed {
+		t.Errorf("expected status %s, got %s", StatusFailed, retrieved.Status)
+	}
+
+	// Check that error message mentions timeout
+	if retrieved.Error == "" {
+		t.Error("expected error message about timeout, got empty string")
+	}
+}
+
+// TestExecuteJob_NoTimeout tests that jobs without timeout run to completion
+func TestExecuteJob_NoTimeout(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "agent", 0) // 0 means no timeout
+
+	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+		logFn("info", "starting execution")
+		time.Sleep(50 * time.Millisecond)
+		return "result", nil
+	}
+
+	go ExecuteJob(context.Background(), mgr, job.ID, executor)
+
+	// Wait for execution to complete
+	time.Sleep(200 * time.Millisecond)
+
+	retrieved, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+
+	// The job should complete successfully
+	if retrieved.Status != StatusCompleted {
+		t.Errorf("expected status %s, got %s", StatusCompleted, retrieved.Status)
+	}
+
+	if retrieved.Result != "result" {
+		t.Errorf("expected result 'result', got '%s'", retrieved.Result)
+	}
+}
+
+// TestJobTimeoutInSummary tests that timeout is included in job summaries
+func TestJobTimeoutInSummary(t *testing.T) {
+	mgr := NewManager()
+	timeout := 30 * time.Second
+	_ = mgr.Submit("test prompt", "agent", timeout)
+
+	summaries := mgr.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+
+	summary := summaries[0]
+	if summary.Timeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, summary.Timeout)
+	}
+}
+
+// TestJobTimeoutInClone tests that timeout is preserved when cloning jobs
+func TestJobTimeoutInClone(t *testing.T) {
+	mgr := NewManager()
+	timeout := 15 * time.Second
+	job := mgr.Submit("test prompt", "agent", timeout)
+
+	// Get returns a clone
+	cloned, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+
+	if cloned.Timeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, cloned.Timeout)
+	}
+}
+

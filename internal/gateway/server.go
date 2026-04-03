@@ -308,6 +308,7 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Prompt    string `json:"prompt"`
 			AgentName string `json:"agent_name"`
+			Timeout   int    `json:"timeout"` // Timeout in seconds, 0 means no timeout
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -323,7 +324,10 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request) {
 			req.AgentName = "acpx"
 		}
 
-		submittedJob := s.jobMgr.Submit(req.Prompt, req.AgentName)
+		// Convert timeout from seconds to duration
+		timeout := time.Duration(req.Timeout) * time.Second
+
+		submittedJob := s.jobMgr.Submit(req.Prompt, req.AgentName, timeout)
 
 		// Start executing the job in background
 		go job.ExecuteJob(context.Background(), s.jobMgr, submittedJob.ID, s.executeJobPrompt)
@@ -1112,6 +1116,7 @@ func (s *Server) handleJobSubmit(connID string, req *JSONRPCRequest) *JSONRPCRes
 
 	prompt := getStringParam(params, "prompt")
 	agentName := getStringParam(params, "agent")
+	timeoutSeconds := getIntParam(params, "timeout")
 	if prompt == "" {
 		return missingParam(req.ID, "prompt")
 	}
@@ -1119,7 +1124,10 @@ func (s *Server) handleJobSubmit(connID string, req *JSONRPCRequest) *JSONRPCRes
 		agentName = "acpx"
 	}
 
-	submittedJob := s.jobMgr.Submit(prompt, agentName)
+	// Convert timeout from seconds to duration (0 means no timeout)
+	timeout := time.Duration(timeoutSeconds) * time.Second
+
+	submittedJob := s.jobMgr.Submit(prompt, agentName, timeout)
 
 	// Start executing the job in background
 	go job.ExecuteJob(context.Background(), s.jobMgr, submittedJob.ID, s.executeJobPrompt)
