@@ -89,7 +89,11 @@ var (
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "IMClaw CLI - Command line interface for IMClaw\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: %s [options] [-p <message> | <message>]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [command] [options] [-p <message> | <message>]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Commands:\n")
+		fmt.Fprintf(os.Stderr, "  job       Manage background jobs\n")
+		fmt.Fprintf(os.Stderr, "            (job submit, job status, job logs, job cancel, job list, job delete)\n")
+		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "If message is provided (-p or positional), sends it and exits.\n")
 		fmt.Fprintf(os.Stderr, "If no message, starts interactive REPL mode.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
@@ -99,6 +103,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # One-shot mode with -p\n")
 		fmt.Fprintf(os.Stderr, "  %s -p \"What is Go?\"\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Submit a background job\n")
+		fmt.Fprintf(os.Stderr, "  %s job submit -p \"What is Go?\"\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Check job status\n")
+		fmt.Fprintf(os.Stderr, "  %s job status <job-id>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # One-shot mode with positional argument\n")
 		fmt.Fprintf(os.Stderr, "  %s \"What is Go?\"\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Use specific agent\n")
@@ -107,12 +115,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s --format json --approve-all -p \"Hello\"\n", os.Args[0])
 	}
 
+	// Parse flags but stop before processing commands
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("IMClaw CLI %s\n", Version)
 		fmt.Printf("Build Time: %s\n", BuildTime)
 		os.Exit(0)
+	}
+
+	// Handle job subcommands
+	if len(os.Args) > 1 && os.Args[1] == "job" {
+		handleJobCommand()
+		return
 	}
 
 	// Validate permission flags (only one can be set)
@@ -961,4 +976,302 @@ func printJSON(v interface{}) {
 		return
 	}
 	fmt.Println(string(data))
+}
+
+// handleJobCommand handles job subcommands
+func handleJobCommand() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Error: job command requires an action\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s job <action> [options]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Actions: submit, status, logs, cancel, list, delete\n")
+		os.Exit(1)
+	}
+
+	action := os.Args[2]
+
+	// Rebuild args without the "job" prefix for flag parsing
+	jobArgs := []string{os.Args[0]}
+	if len(os.Args) > 3 {
+		jobArgs = append(jobArgs, os.Args[3:]...)
+	}
+
+	// Parse flags for job commands
+	flag.CommandLine.Parse(jobArgs)
+
+	switch action {
+	case "submit":
+		handleJobSubmit()
+	case "status":
+		handleJobStatus()
+	case "logs":
+		handleJobLogs()
+	case "cancel":
+		handleJobCancel()
+	case "list":
+		handleJobList()
+	case "delete":
+		handleJobDelete()
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unknown job action: %s\n", action)
+		fmt.Fprintf(os.Stderr, "Valid actions: submit, status, logs, cancel, list, delete\n")
+		os.Exit(1)
+	}
+}
+
+// handleJobSubmit submits a new background job
+func handleJobSubmit() {
+	if *promptFlag == "" {
+		fmt.Fprintf(os.Stderr, "Error: -p <prompt> is required for job submit\n")
+		os.Exit(1)
+	}
+
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{
+		"prompt":     *promptFlag,
+		"agent_name": *agentType,
+	}
+	if reqBody["agent_name"] == "" {
+		reqBody["agent_name"] = "acpx"
+	}
+
+	reqJSON, _ := json.Marshal(reqBody)
+	resp, err := http.Post(serverHTTP+"/api/jobs", "application/json", strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error submitting job: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	var job map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Job submitted successfully\n")
+	fmt.Printf("ID: %s\n", job["id"])
+	fmt.Printf("Status: %s\n", job["status"])
+	fmt.Printf("Created: %s\n", job["created_at"])
+	fmt.Printf("\nUse '%s job status %s' to check status\n", os.Args[0], job["id"])
+}
+
+// handleJobStatus shows the status of a job
+func handleJobStatus() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: job status requires a job ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s job status <job-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	jobID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	resp, err := http.Get(serverHTTP + "/api/jobs/" + jobID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching job: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: job not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	var job map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print job status
+	if *format == "json" {
+		printJSON(job)
+		return
+	}
+
+	fmt.Printf("Job ID: %s\n", job["id"])
+	fmt.Printf("Status: %s\n", job["status"])
+	fmt.Printf("Prompt: %s\n", job["prompt"])
+	fmt.Printf("Agent: %s\n", job["agent_name"])
+	fmt.Printf("Created: %s\n", job["created_at"])
+
+	if startedAt, ok := job["started_at"].(string); ok && startedAt != "" {
+		fmt.Printf("Started: %s\n", startedAt)
+	}
+	if finishedAt, ok := job["finished_at"].(string); ok && finishedAt != "" {
+		fmt.Printf("Finished: %s\n", finishedAt)
+	}
+	if result, ok := job["result"].(string); ok && result != "" {
+		fmt.Printf("\nResult:\n%s\n", result)
+	}
+	if errMsg, ok := job["error"].(string); ok && errMsg != "" {
+		fmt.Printf("\nError: %s\n", errMsg)
+	}
+
+	// Show logs if available
+	if logs, ok := job["logs"].([]interface{}); ok && len(logs) > 0 {
+		fmt.Printf("\nLogs (%d entries):\n", len(logs))
+		for _, logEntry := range logs {
+			if entry, ok := logEntry.(map[string]interface{}); ok {
+				timestamp, _ := entry["timestamp"].(string)
+				level, _ := entry["level"].(string)
+				message, _ := entry["message"].(string)
+				fmt.Printf("  [%s] %s: %s\n", timestamp, level, message)
+			}
+		}
+	}
+}
+
+// handleJobLogs shows the logs of a job
+func handleJobLogs() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: job logs requires a job ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s job logs <job-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	handleJobStatus() // Logs are included in status output
+}
+
+// handleJobCancel cancels a running or queued job
+func handleJobCancel() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: job cancel requires a job ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s job cancel <job-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	jobID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]string{"action": "cancel"}
+	reqJSON, _ := json.Marshal(reqBody)
+	resp, err := http.Post(serverHTTP+"/api/jobs/"+jobID, "application/json", strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error canceling job: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Job %s canceled successfully\n", jobID)
+}
+
+// handleJobList lists all jobs
+func handleJobList() {
+	serverHTTP := getServerHTTPURL()
+
+	resp, err := http.Get(serverHTTP + "/api/jobs")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching jobs: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	var result struct {
+		Jobs  []map[string]interface{} `json:"jobs"`
+		Count int                     `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		printJSON(result)
+		return
+	}
+
+	if result.Count == 0 {
+		fmt.Println("No jobs found")
+		return
+	}
+
+	fmt.Printf("Jobs (%d total):\n\n", result.Count)
+	for _, job := range result.Jobs {
+		fmt.Printf("ID: %s\n", job["id"])
+		fmt.Printf("  Status: %s\n", job["status"])
+		fmt.Printf("  Prompt: %s\n", job["prompt"])
+		fmt.Printf("  Created: %s\n", job["created_at"])
+		if startedAt, ok := job["started_at"].(string); ok && startedAt != "" {
+			fmt.Printf("  Started: %s\n", startedAt)
+		}
+		if finishedAt, ok := job["finished_at"].(string); ok && finishedAt != "" {
+			fmt.Printf("  Finished: %s\n", finishedAt)
+		}
+		fmt.Println()
+	}
+}
+
+// handleJobDelete deletes a job
+func handleJobDelete() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: job delete requires a job ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s job delete <job-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	jobID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	req, err := http.NewRequest(http.MethodDelete, serverHTTP+"/api/jobs/"+jobID, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error deleting job: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Job %s deleted successfully\n", jobID)
+}
+
+// getServerHTTPURL converts WebSocket URL to HTTP URL
+func getServerHTTPURL() string {
+	wsURL := *serverURL
+	u, err := url.Parse(wsURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing server URL: %v\n", err)
+		os.Exit(1)
+	}
+
+	scheme := "http"
+	if u.Scheme == "wss" {
+		scheme = "https"
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, u.Host)
 }

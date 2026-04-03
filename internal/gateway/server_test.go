@@ -7,6 +7,7 @@ import (
 
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/event"
+	"github.com/smallnest/imclaw/internal/job"
 	"github.com/smallnest/imclaw/internal/session"
 )
 
@@ -185,7 +186,7 @@ func TestBuildStructuredEventsIncludesFallbackErrors(t *testing.T) {
 
 func TestEnsureAgentSessionStoresInternalIDAndHandle(t *testing.T) {
 	sessionMgr := session.NewManager()
-	srv := NewServer(&Config{}, sessionMgr, agent.NewManager())
+	srv := NewServer(&Config{}, sessionMgr, agent.NewManager(), job.NewManager())
 	sess := sessionMgr.Create(defaultSessionChannel, "", "sess-ensure", "claude")
 
 	handle, err := srv.ensureAgentSession(sess, stubAgent{ensureSessionID: "acpx-123"}, "req-1")

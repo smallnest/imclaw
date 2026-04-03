@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/smallnest/imclaw/internal/agent"
+	"github.com/smallnest/imclaw/internal/job"
 	"github.com/smallnest/imclaw/internal/session"
 )
 
 func TestSessionsAPIAndDetailIncludePersistedActivity(t *testing.T) {
 	sessionMgr := session.NewManager()
 	agentMgr := agent.NewManager()
-	srv := NewServer(&Config{}, sessionMgr, agentMgr)
+	srv := NewServer(&Config{}, sessionMgr, agentMgr, job.NewManager())
 
 	sess := sessionMgr.Create("cli", "", "sess-1", "claude")
 	if _, ok := sessionMgr.RecordPrompt("cli", sess.ID, "req-1", "hello"); !ok {
@@ -59,7 +60,7 @@ func TestSessionsAPIAndDetailIncludePersistedActivity(t *testing.T) {
 func TestHandleSessionUpdateChangesAgent(t *testing.T) {
 	sessionMgr := session.NewManager()
 	agentMgr := agent.NewManager()
-	srv := NewServer(&Config{}, sessionMgr, agentMgr)
+	srv := NewServer(&Config{}, sessionMgr, agentMgr, job.NewManager())
 
 	sess := sessionMgr.Create("cli", "", "sess-2", "claude")
 	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
@@ -93,7 +94,7 @@ func TestHandleSessionUpdateChangesAgent(t *testing.T) {
 }
 
 func TestHandleSessionUpdateMissingSessionID(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      "req-missing",
@@ -108,7 +109,7 @@ func TestHandleSessionUpdateMissingSessionID(t *testing.T) {
 }
 
 func TestHandleSessionUpdateMissingSession(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	resp := srv.handleSessionUpdate("", &JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      "req-missing-session",
@@ -124,7 +125,7 @@ func TestHandleSessionUpdateMissingSession(t *testing.T) {
 }
 
 func TestHandleSessionDetailAPINotFound(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing", nil)
 	rec := httptest.NewRecorder()
 
@@ -135,7 +136,7 @@ func TestHandleSessionDetailAPINotFound(t *testing.T) {
 }
 
 func TestHandleUIServesEmbeddedFrontend(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/sessions/demo", nil)
 	rec := httptest.NewRecorder()
 
@@ -152,7 +153,7 @@ func TestHandleUIServesEmbeddedFrontend(t *testing.T) {
 }
 
 func TestHandleUIServesAssetWithCorrectMimeType(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 
 	tests := []struct {
 		path        string
@@ -181,7 +182,7 @@ func TestHandleUIServesAssetWithCorrectMimeType(t *testing.T) {
 }
 
 func TestHandleUINoCacheInDevMode(t *testing.T) {
-	srv := NewServer(&Config{DevMode: true}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{DevMode: true}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -198,7 +199,7 @@ func TestHandleUINoCacheInDevMode(t *testing.T) {
 }
 
 func TestHandleUICacheHeadersInProduction(t *testing.T) {
-	srv := NewServer(&Config{DevMode: false}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{DevMode: false}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -215,7 +216,7 @@ func TestHandleUICacheHeadersInProduction(t *testing.T) {
 }
 
 func TestHandleBuildInfo(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/api/build", nil)
 	rec := httptest.NewRecorder()
 
@@ -243,7 +244,7 @@ func TestHandleBuildInfo(t *testing.T) {
 }
 
 func TestHandleUIAssetNotFound(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/assets/nonexistent.js", nil)
 	rec := httptest.NewRecorder()
 
@@ -255,7 +256,7 @@ func TestHandleUIAssetNotFound(t *testing.T) {
 }
 
 func TestHandleUIAssetRejectsTraversal(t *testing.T) {
-	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager())
+	srv := NewServer(&Config{}, session.NewManager(), agent.NewManager(), job.NewManager())
 	req := httptest.NewRequest(http.MethodGet, "/assets/../server.go", nil)
 	rec := httptest.NewRecorder()
 
