@@ -21,9 +21,12 @@
 set -e
 
 # ==================== 环境变量处理 ====================
-# Codex 需要使用 OpenAI API，unset 自定义的 base URL 避免冲突
-# 如果你想使用自定义 API base，注释掉下面这行
-unset OPENAI_API_BASE 2>/dev/null || true
+# 加载用户环境变量（包括 OPENROUTER_API_KEY 等）
+if [ -f "$HOME/.zshrc" ]; then
+    source "$HOME/.zshrc" 2>/dev/null || true
+elif [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc" 2>/dev/null || true
+fi
 
 # ==================== 配置 ====================
 DEFAULT_MAX_ITERATIONS=42
@@ -90,18 +93,37 @@ run_with_retry() {
 
         log "调用 $agent (尝试 $retry/$MAX_RETRIES)..."
 
-        # 执行命令
-        if acpx --approve-all $agent "$prompt" 2>&1 | tee "$log_file"; then
-            # 检查是否有错误
-            if ! grep -q "\[error\]" "$log_file" 2>/dev/null; then
-                # 检查是否有实际输出
-                local content_lines
-                content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
-                if [ "$content_lines" -ge 5 ]; then
-                    success=1
-                    break
-                else
-                    log "警告: 输出内容过少 ($content_lines 行)"
+        # 根据 agent 类型选择调用方式
+        if [ "$agent" = "codex" ]; then
+            # codex 直接调用，不使用 acpx
+            if codex exec "$prompt" 2>&1 | tee "$log_file"; then
+                # 检查是否有错误
+                if ! grep -q "ERROR:" "$log_file" 2>/dev/null; then
+                    # 检查是否有实际输出（过滤掉头部信息）
+                    local content_lines
+                    content_lines=$(grep -v "^OpenAI Codex" "$log_file" | grep -v "^workdir:" "$log_file" | grep -v "^model:" "$log_file" | grep -v "^provider:" "$log_file" | grep -v "^approval:" "$log_file" | grep -v "^sandbox:" "$log_file" | grep -v "^reasoning" "$log_file" | grep -v "^session id:" "$log_file" | grep -v "^--------" "$log_file" | grep -v "^user$" "$log_file" | grep -v "^$" | wc -l)
+                    if [ "$content_lines" -ge 3 ]; then
+                        success=1
+                        break
+                    else
+                        log "警告: 输出内容过少 ($content_lines 行)"
+                    fi
+                fi
+            fi
+        else
+            # 其他 agent 使用 acpx
+            if acpx --approve-all $agent "$prompt" 2>&1 | tee "$log_file"; then
+                # 检查是否有错误
+                if ! grep -q "\[error\]" "$log_file" 2>/dev/null; then
+                    # 检查是否有实际输出
+                    local content_lines
+                    content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" "$log_file" | grep -v "^\[error\]" "$log_file" | grep -v "^$" | wc -l)
+                    if [ "$content_lines" -ge 5 ]; then
+                        success=1
+                        break
+                    else
+                        log "警告: 输出内容过少 ($content_lines 行)"
+                    fi
                 fi
             fi
         fi
@@ -178,6 +200,11 @@ check_dependencies() {
         missing=1
     fi
 
+    if ! command -v codex &> /dev/null; then
+        error "codex 未安装"
+        missing=1
+    fi
+
     if ! command -v acpx &> /dev/null; then
         error "acpx 未安装，请先安装 acpx"
         missing=1
@@ -202,14 +229,9 @@ ensure_acpx_session() {
 
     # 先关闭可能存在的旧 session（避免缓存旧配置）
     log "关闭旧 session..."
-    acpx codex sessions close 2>/dev/null || true
     acpx claude sessions close 2>/dev/null || true
 
     sleep 1
-
-    # 创建新的 codex session
-    log "创建 codex session..."
-    acpx codex sessions new 2>&1
 
     # 创建新的 claude session
     log "创建 claude session..."
@@ -696,7 +718,7 @@ get_issue_info "$ISSUE_NUMBER"
 # 设置工作目录
 setup_work_directory "$ISSUE_NUMBER"
 
-# 确保 acpx session 存在
+# 确保 acpx session 存在 (仅用于 claude)
 ensure_acpx_session
 
 # 创建分支
@@ -733,7 +755,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
             if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
                 error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
-                error "请检查 acpx codex 配置"
+                error "请检查 codex 配置"
 
                 record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
                 exit 1
