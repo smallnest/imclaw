@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -512,5 +513,142 @@ func TestJobSummary(t *testing.T) {
 	}
 	if summary.Prompt != job.Prompt {
 		t.Errorf("expected prompt %s, got %s", job.Prompt, summary.Prompt)
+	}
+}
+
+// TestListDoesNotIncludeLogs verifies that List() does not copy log entries.
+// This prevents memory leaks when listing jobs with large logs.
+func TestListDoesNotIncludeLogs(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "test-agent")
+
+	// Add many log entries
+	for i := 0; i < 100; i++ {
+		mgr.AddLog(job.ID, "info", fmt.Sprintf("Log entry %d", i))
+	}
+
+	// Verify logs are in the original job
+	originalJob, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+	if len(originalJob.Logs) != 101 { // Submit adds 1 log + 100 logs
+		t.Errorf("expected 101 logs in original job, got %d", len(originalJob.Logs))
+	}
+
+	// Verify List() does not include logs
+	jobs := mgr.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if jobs[0].Logs != nil {
+		t.Errorf("List() should not include logs, but got %d logs", len(jobs[0].Logs))
+	}
+}
+
+// TestLogSizeLimit verifies that log entries are limited to MaxLogEntries.
+func TestLogSizeLimit(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "test-agent")
+
+	// Add more log entries than MaxLogEntries
+	for i := 0; i < MaxLogEntries+100; i++ {
+		mgr.AddLog(job.ID, "info", fmt.Sprintf("Log entry %d", i))
+	}
+
+	// Verify logs are limited
+	retrieved, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+	if len(retrieved.Logs) > MaxLogEntries {
+		t.Errorf("logs should be limited to %d, got %d", MaxLogEntries, len(retrieved.Logs))
+	}
+
+	// Verify we kept the most recent entries
+	// The first log should be around index 100 (not 0)
+	if retrieved.Logs[0].Message != "Log entry 100" {
+		t.Errorf("expected oldest log to be 'Log entry 100', got '%s'", retrieved.Logs[0].Message)
+	}
+}
+
+// TestListSorting verifies that List() returns jobs in descending order by creation time.
+func TestListSorting(t *testing.T) {
+	mgr := NewManager()
+
+	// Create multiple jobs with slight delays to ensure different timestamps
+	ids := make([]string, 5)
+	for i := 0; i < 5; i++ {
+		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		ids[i] = job.ID
+		time.Sleep(10 * time.Millisecond) // Ensure different timestamps
+	}
+
+	jobs := mgr.List()
+
+	// Verify we have all jobs
+	if len(jobs) != 5 {
+		t.Fatalf("expected 5 jobs, got %d", len(jobs))
+	}
+
+	// Verify descending order (newest first)
+	for i := 0; i < len(jobs)-1; i++ {
+		if jobs[i].CreatedAt.Before(jobs[i+1].CreatedAt) {
+			t.Errorf("jobs not sorted in descending order: job[%d].CreatedAt=%v after job[%d].CreatedAt=%v",
+				i, jobs[i].CreatedAt, i+1, jobs[i+1].CreatedAt)
+		}
+	}
+
+	// Verify the newest job is last (highest index in creation order)
+	if jobs[0].ID != ids[4] {
+		t.Errorf("expected newest job ID %s at position 0, got %s", ids[4], jobs[0].ID)
+	}
+}
+
+// TestSummariesSorting verifies that Summaries() returns jobs in descending order.
+func TestSummariesSorting(t *testing.T) {
+	mgr := NewManager()
+
+	// Create multiple jobs
+	for i := 0; i < 5; i++ {
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	summaries := mgr.Summaries()
+
+	// Verify descending order
+	for i := 0; i < len(summaries)-1; i++ {
+		if summaries[i].CreatedAt.Before(summaries[i+1].CreatedAt) {
+			t.Errorf("summaries not sorted in descending order")
+		}
+	}
+}
+
+// BenchmarkListJobs benchmarks the List() method with many jobs.
+func BenchmarkListJobs(b *testing.B) {
+	mgr := NewManager()
+	// Create 1000 jobs
+	for i := 0; i < 1000; i++ {
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mgr.List()
+	}
+}
+
+// BenchmarkSummaries benchmarks the Summaries() method with many jobs.
+func BenchmarkSummaries(b *testing.B) {
+	mgr := NewManager()
+	// Create 1000 jobs
+	for i := 0; i < 1000; i++ {
+		mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mgr.Summaries()
 	}
 }
