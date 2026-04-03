@@ -29,6 +29,9 @@ unset OPENAI_API_BASE 2>/dev/null || true
 DEFAULT_MAX_ITERATIONS=42
 PASSING_SCORE=8.5
 MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
+MAX_RETRIES=10              # 退火重试最大次数
+RETRY_BASE_DELAY=2          # 退火重试初始等待时间（秒）
+RETRY_MAX_DELAY=60          # 退火重试最大等待时间（秒）
 
 # 脚本所在目录（用于查找默认 agents 配置）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +47,74 @@ log() {
 
 error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >&2
+}
+
+# 退火重试函数
+# 使用指数退避算法计算等待时间，并添加随机抖动
+# 参数: $1 = 当前重试次数 (从1开始)
+annealing_delay() {
+    local retry=$1
+    # 指数退避: 2^retry * base_delay
+    local delay=$((RETRY_BASE_DELAY * (1 << (retry - 1))))
+    # 添加随机抖动 (0-25%)
+    local jitter=$((delay / 4))
+    if [ $jitter -gt 0 ]; then
+        jitter=$((RANDOM % jitter))
+    fi
+    delay=$((delay + jitter))
+    # 不超过最大等待时间
+    if [ $delay -gt $RETRY_MAX_DELAY ]; then
+        delay=$RETRY_MAX_DELAY
+    fi
+    echo $delay
+}
+
+# 执行带退火重试的命令
+# 参数: $1 = agent名称 (codex/claude), $2 = prompt
+run_with_retry() {
+    local agent=$1
+    local prompt="$2"
+    local log_file="$3"
+    local retry=0
+    local success=0
+
+    while [ $retry -lt $MAX_RETRIES ]; do
+        retry=$((retry + 1))
+
+        if [ $retry -gt 1 ]; then
+            local delay
+            delay=$(annealing_delay $retry)
+            log "第 $retry/$MAX_RETRIES 次重试，等待 ${delay} 秒..."
+            sleep $delay
+        fi
+
+        log "调用 $agent (尝试 $retry/$MAX_RETRIES)..."
+
+        # 执行命令
+        if acpx --approve-all $agent "$prompt" 2>&1 | tee "$log_file"; then
+            # 检查是否有错误
+            if ! grep -q "\[error\]" "$log_file" 2>/dev/null; then
+                # 检查是否有实际输出
+                local content_lines
+                content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
+                if [ "$content_lines" -ge 5 ]; then
+                    success=1
+                    break
+                else
+                    log "警告: 输出内容过少 ($content_lines 行)"
+                fi
+            fi
+        fi
+
+        log "$agent 第 $retry 次调用失败"
+    done
+
+    if [ $success -eq 1 ]; then
+        return 0
+    else
+        error "$agent 调用失败，已重试 $MAX_RETRIES 次"
+        return 1
+    fi
 }
 
 usage() {
@@ -285,21 +356,10 @@ $codex_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-codex.log"
 
-    # 使用 acpx codex (自动批准所有权限请求)
+    # 使用退火重试机制调用 codex
     cd "$PROJECT_ROOT"
-    acpx --approve-all codex "$prompt" 2>&1 | tee "$log_file"
-
-    # 检查是否有错误
-    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
-        error "Codex 执行失败，请检查日志: $log_file"
+    if ! run_with_retry codex "$prompt" "$log_file"; then
         return 1
-    fi
-
-    # 检查是否有实际输出（不只是 acpx 状态信息）
-    local content_lines
-    content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
-    if [ "$content_lines" -lt 5 ]; then
-        log "警告: Codex 输出内容过少 ($content_lines 行)，可能执行失败"
     fi
 
     echo "" >> "$WORK_DIR/log.md"
@@ -357,21 +417,10 @@ $claude_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-claude.log"
 
-    # 使用 acpx claude (自动批准所有权限请求)
+    # 使用退火重试机制调用 claude
     cd "$PROJECT_ROOT"
-    acpx --approve-all claude "$prompt" 2>&1 | tee "$log_file"
-
-    # 检查是否有错误
-    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
-        error "Claude 执行失败，请检查日志: $log_file"
+    if ! run_with_retry claude "$prompt" "$log_file"; then
         return 1
-    fi
-
-    # 检查是否有实际输出
-    local content_lines
-    content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" | grep -v "^\[error\]" | grep -v "^$" | wc -l)
-    if [ "$content_lines" -lt 5 ]; then
-        log "警告: Claude 输出内容过少 ($content_lines 行)，可能执行失败"
     fi
 
     echo "" >> "$WORK_DIR/log.md"
@@ -436,19 +485,17 @@ $claude_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-claude-review.log"
 
+    # 使用退火重试机制调用 claude
     cd "$PROJECT_ROOT"
-    local review_result
-    review_result=$(acpx --approve-all claude "$prompt" 2>&1 | tee "$log_file")
-
-    # 检查是否有错误
-    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
-        error "Claude 执行失败，请检查日志: $log_file"
+    if ! run_with_retry claude "$prompt" "$log_file"; then
         echo "0" > "$WORK_DIR/.last_score"
         return 1
     fi
 
     # 提取评分 - 兼容 macOS (不使用 grep -P)，支持小数
     local score=0
+    local review_result
+    review_result=$(cat "$log_file")
 
     # 尝试多种格式匹配
     # 格式1: 评分: X/10 或 Score: X/10 (支持小数如 8.5)
@@ -519,19 +566,17 @@ $codex_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-codex-review.log"
 
+    # 使用退火重试机制调用 codex
     cd "$PROJECT_ROOT"
-    local review_result
-    review_result=$(acpx --approve-all codex "$prompt" 2>&1 | tee "$log_file")
-
-    # 检查是否有错误
-    if grep -q "\[error\]" "$log_file" 2>/dev/null; then
-        error "Codex 执行失败，请检查日志: $log_file"
+    if ! run_with_retry codex "$prompt" "$log_file"; then
         echo "0" > "$WORK_DIR/.last_score"
         return 1
     fi
 
     # 提取评分 - 兼容 macOS (不使用 grep -P)，支持小数
     local score=0
+    local review_result
+    review_result=$(cat "$log_file")
 
     # 尝试多种格式匹配
     local score_line
