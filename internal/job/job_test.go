@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -650,5 +651,598 @@ func BenchmarkSummaries(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mgr.Summaries()
+	}
+}
+
+// TestConcurrentAccess tests that the Manager is safe for concurrent access.
+func TestConcurrentAccess(t *testing.T) {
+	mgr := NewManager()
+	const numGoroutines = 50
+	const opsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Run many goroutines that concurrently submit, get, and list jobs.
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			for j := 0; j < opsPerGoroutine; j++ {
+				switch j % 5 {
+				case 0:
+					// Submit a job
+					mgr.Submit(fmt.Sprintf("prompt %d-%d", idx, j), "agent")
+				case 1:
+					mgr.List()
+				case 2:
+					mgr.Summaries()
+				case 3:
+					// Try to get a non-existent job (should not panic)
+					_, _ = mgr.Get("non-existent")
+				case 4:
+					mgr.Cleanup(0)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all jobs are accounted for
+	jobs := mgr.List()
+	if len(jobs) == 0 {
+		t.Error("expected jobs to exist after concurrent access")
+	}
+}
+
+// TestManagerCancel_NonExistent tests that canceling a non-existent job returns an error.
+func TestManagerCancel_NonExistent(t *testing.T) {
+	mgr := NewManager()
+
+	err := mgr.Cancel("non-existent-id")
+	if err == nil {
+		t.Error("expected error when canceling non-existent job")
+	}
+}
+
+// TestManagerDelete_NonExistent tests that deleting a non-existent job returns an error.
+func TestManagerDelete_NonExistent(t *testing.T) {
+	mgr := NewManager()
+
+	err := mgr.Delete("non-existent-id")
+	if err == nil {
+		t.Error("expected error when deleting non-existent job")
+	}
+}
+
+// TestManagerDelete_GetAfterDelete verifies that a job cannot be retrieved after deletion.
+func TestManagerDelete_GetAfterDelete(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	err := mgr.Delete(job.ID)
+	if err != nil {
+		t.Fatalf("unexpected error deleting job: %v", err)
+	}
+
+	_, ok := mgr.Get(job.ID)
+	if ok {
+		t.Error("expected Get to return false after deletion")
+	}
+}
+
+// TestManagerCancel_ListAfterCancel verifies that a canceled job can still be listed
+// and has the correct status.
+func TestManagerCancel_ListAfterCancel(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	err := mgr.Cancel(job.ID)
+	if err != nil {
+		t.Fatalf("unexpected error canceling job: %v", err)
+	}
+
+	// Verify Get returns canceled status
+	retrieved, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("expected job to be found")
+	}
+	if retrieved.Status != StatusCanceled {
+		t.Errorf("expected status %s, got %s", StatusCanceled, retrieved.Status)
+	}
+	if retrieved.FinishedAt == nil {
+		t.Error("expected FinishedAt to be set after cancel")
+	}
+
+	// Verify List includes the canceled job
+	jobs := mgr.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job in list, got %d", len(jobs))
+	}
+	if jobs[0].ID != job.ID {
+		t.Errorf("expected job ID %s, got %s", job.ID, jobs[0].ID)
+	}
+}
+
+// TestManagerStart_NonExistent tests starting a job that doesn't exist.
+func TestManagerStart_NonExistent(t *testing.T) {
+	mgr := NewManager()
+	_, cancel := context.WithCancel(context.Background())
+
+	err := mgr.Start("non-existent-id", cancel)
+	if err == nil {
+		t.Error("expected error when starting non-existent job")
+	}
+}
+
+// TestManagerComplete_NonExistent tests completing a job that doesn't exist.
+func TestManagerComplete_NonExistent(t *testing.T) {
+	mgr := NewManager()
+
+	err := mgr.Complete("non-existent-id", "result")
+	if err == nil {
+		t.Error("expected error when completing non-existent job")
+	}
+}
+
+// TestManagerFail_NonExistent tests failing a job that doesn't exist.
+func TestManagerFail_NonExistent(t *testing.T) {
+	mgr := NewManager()
+
+	err := mgr.Fail("non-existent-id", "error msg")
+	if err == nil {
+		t.Error("expected error when failing non-existent job")
+	}
+}
+
+// TestManagerAddLog_NonExistent tests adding a log to a job that doesn't exist.
+func TestManagerAddLog_NonExistent(t *testing.T) {
+	mgr := NewManager()
+
+	err := mgr.AddLog("non-existent-id", "info", "message")
+	if err == nil {
+		t.Error("expected error when adding log to non-existent job")
+	}
+	if err.Error() != "job not found: non-existent-id" {
+		t.Errorf("expected specific error message, got: %v", err)
+	}
+}
+
+// TestStatusTransition_CompletedToCanceled tests that a completed job can't be canceled.
+func TestStatusTransition_CompletedToCanceled(t *testing.T) {
+	job := &Job{Status: StatusCompleted}
+	err := job.transitionStatus(StatusCanceled)
+	if err == nil {
+		t.Error("expected error when canceling a completed job")
+	}
+}
+
+// TestStatusTransition_FailedToCompleted tests invalid transition.
+func TestStatusTransition_FailedToCompleted(t *testing.T) {
+	job := &Job{Status: StatusFailed}
+	err := job.transitionStatus(StatusCompleted)
+	if err == nil {
+		t.Error("expected error when transitioning from failed to completed")
+	}
+}
+
+// TestRetryAfterFailure tests that a failed job can be retried by transitioning to queued.
+func TestRetryAfterFailure(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "agent")
+
+	// Start the job
+	_, cancel := context.WithCancel(context.Background())
+	if err := mgr.Start(job.ID, cancel); err != nil {
+		t.Fatalf("unexpected error starting job: %v", err)
+	}
+
+	// Fail the job
+	if err := mgr.Fail(job.ID, "execution error"); err != nil {
+		t.Fatalf("unexpected error failing job: %v", err)
+	}
+
+	// Verify failed status
+	retrieved, _ := mgr.Get(job.ID)
+	if retrieved.Status != StatusFailed {
+		t.Fatalf("expected status %s, got %s", StatusFailed, retrieved.Status)
+	}
+
+	// Retry by transitioning to queued (valid state transition per ValidTransitions)
+	// Note: Failed jobs can transition to Queued for retry
+	err := retrieved.transitionStatus(StatusQueued)
+	if err != nil {
+		t.Errorf("failed to transition to queued for retry: %v", err)
+	}
+
+	// Verify the transition succeeded
+	if retrieved.Status != StatusQueued {
+		t.Errorf("expected status %s after retry transition, got %s", StatusQueued, retrieved.Status)
+	}
+}
+
+// TestExecuteJob_NonExistentID tests that ExecuteJob handles non-existent job ID gracefully.
+func TestExecuteJob_NonExistentID(t *testing.T) {
+	mgr := NewManager()
+
+	executorCalled := false
+	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+		executorCalled = true
+		t.Error("executor should not be called for non-existent job")
+		return "result", nil
+	}
+
+	// ExecuteJob should return early for non-existent jobs
+	ExecuteJob(context.Background(), mgr, "non-existent-id", executor)
+
+	// Give some time for any goroutines to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify executor was not called
+	if executorCalled {
+		t.Error("executor should not be called for non-existent job ID")
+	}
+
+	// Verify no job was created
+	jobs := mgr.List()
+	if len(jobs) != 0 {
+		t.Errorf("expected no jobs, got %d", len(jobs))
+	}
+}
+
+// TestManagerSubmit_EmptyPrompt tests submitting a job with an empty prompt.
+func TestManagerSubmit_EmptyPrompt(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("", "agent")
+
+	// Empty prompt should be allowed (validation is done at API level)
+	if job.Prompt != "" {
+		t.Errorf("expected empty prompt, got %s", job.Prompt)
+	}
+	if job.Status != StatusQueued {
+		t.Errorf("expected status %s, got %s", StatusQueued, job.Status)
+	}
+}
+
+// TestManagerSubmit_EmptyAgentName tests submitting a job without an agent name.
+func TestManagerSubmit_EmptyAgentName(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "")
+
+	// Empty agent name should be allowed
+	if job.AgentName != "" {
+		t.Errorf("expected empty agent name, got %s", job.AgentName)
+	}
+	if job.Status != StatusQueued {
+		t.Errorf("expected status %s, got %s", StatusQueued, job.Status)
+	}
+}
+
+// TestManagerAddLog_LogLevels tests different log levels.
+func TestManagerAddLog_LogLevels(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	levels := []string{"info", "error", "debug", "warn"}
+	for _, level := range levels {
+		err := mgr.AddLog(job.ID, level, fmt.Sprintf("%s message", level))
+		if err != nil {
+			t.Errorf("unexpected error for level %s: %v", level, err)
+		}
+	}
+
+	retrieved, _ := mgr.Get(job.ID)
+	// Submit adds 1 log + 4 more logs
+	if len(retrieved.Logs) != 5 {
+		t.Errorf("expected 5 logs, got %d", len(retrieved.Logs))
+	}
+
+	// Verify log levels are preserved
+	for i, level := range levels {
+		if retrieved.Logs[i+1].Level != level {
+			t.Errorf("expected log level %s at index %d, got %s", level, i+1, retrieved.Logs[i+1].Level)
+		}
+	}
+}
+
+// TestManagerSubmit_UniqueIDs verifies that submitted jobs have unique IDs.
+func TestManagerSubmit_UniqueIDs(t *testing.T) {
+	mgr := NewManager()
+	const numJobs = 100
+
+	ids := make(map[string]bool)
+	for i := 0; i < numJobs; i++ {
+		job := mgr.Submit(fmt.Sprintf("prompt-%d", i), "agent")
+		if ids[job.ID] {
+			t.Fatalf("duplicate job ID found: %s", job.ID)
+		}
+		ids[job.ID] = true
+	}
+
+	if len(ids) != numJobs {
+		t.Errorf("expected %d unique IDs, got %d", numJobs, len(ids))
+	}
+}
+
+// TestCloneJobPreservesFields verifies that cloneJob properly copies all fields except logs (when requested).
+func TestCloneJobPreservesFields(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "test-agent")
+
+	// Start and complete the job
+	_, cancel := context.WithCancel(context.Background())
+	mgr.Start(job.ID, cancel)
+	mgr.Complete(job.ID, "result")
+
+	// Add some logs
+	mgr.AddLog(job.ID, "info", "log message")
+
+	// Get with logs
+	retrieved, _ := mgr.Get(job.ID)
+	if retrieved.ID != job.ID {
+		t.Errorf("expected ID %s, got %s", job.ID, retrieved.ID)
+	}
+	if retrieved.Status != StatusCompleted {
+		t.Errorf("expected status %s, got %s", StatusCompleted, retrieved.Status)
+	}
+	if retrieved.Prompt != "test prompt" {
+		t.Errorf("expected prompt 'test prompt', got %s", retrieved.Prompt)
+	}
+	if retrieved.Result != "result" {
+		t.Errorf("expected result 'result', got %s", retrieved.Result)
+	}
+	if len(retrieved.Logs) == 0 {
+		t.Error("expected logs to be included in Get()")
+	}
+}
+
+// TestCanceledJobCannotBeCanceledAgain verifies canceling an already canceled job returns an error.
+func TestCanceledJobCannotBeCanceledAgain(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	// Cancel once
+	if err := mgr.Cancel(job.ID); err != nil {
+		t.Fatalf("unexpected error canceling job: %v", err)
+	}
+
+	// Try to cancel again
+	err := mgr.Cancel(job.ID)
+	if err == nil {
+		t.Error("expected error when canceling an already canceled job")
+	}
+}
+
+// TestCompletedJobCannotBeCompletedAgain verifies completing an already completed job returns an error.
+func TestCompletedJobCannotBeCompletedAgain(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	// Start the job
+	_, cancel := context.WithCancel(context.Background())
+	if err := mgr.Start(job.ID, cancel); err != nil {
+		t.Fatalf("unexpected error starting job: %v", err)
+	}
+
+	// Complete once
+	if err := mgr.Complete(job.ID, "result"); err != nil {
+		t.Fatalf("unexpected error completing job: %v", err)
+	}
+
+	// Try to complete again
+	err := mgr.Complete(job.ID, "result")
+	if err == nil {
+		t.Error("expected error when completing an already completed job")
+	}
+}
+
+// TestDeleteCancelsRunningJob verifies that deleting a running job cancels its context.
+func TestDeleteCancelsRunningJob(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a goroutine that blocks on the context
+	done := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		close(done)
+	}()
+
+	// Start the job with the context
+	if err := mgr.Start(job.ID, cancel); err != nil {
+		t.Fatalf("unexpected error starting job: %v", err)
+	}
+
+	// Delete the running job
+	if err := mgr.Delete(job.ID); err != nil {
+		t.Fatalf("unexpected error deleting job: %v", err)
+	}
+
+	// Verify context was cancelled
+	select {
+	case <-done:
+		// Context was cancelled, as expected
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected context to be cancelled after deleting running job")
+	}
+}
+
+// TestCleanupDoesNotRemoveRunningOrQueued verifies that Cleanup leaves running/queued jobs.
+func TestCleanupDoesNotRemoveRunningOrQueued(t *testing.T) {
+	mgr := NewManager()
+
+	// Create a queued job
+	queued := mgr.Submit("queued prompt", "agent")
+
+	// Create a completed job that's old
+	completed := mgr.Submit("completed prompt", "agent")
+	_, cancel := context.WithCancel(context.Background())
+	mgr.Start(completed.ID, cancel)
+	mgr.Complete(completed.ID, "result")
+
+	// Manually age the completed job
+	oldTime := time.Now().Add(-2 * time.Hour)
+	mgr.mu.Lock()
+	if job, ok := mgr.jobs[completed.ID]; ok {
+		job.FinishedAt = &oldTime
+	}
+	mgr.mu.Unlock()
+
+	// Cleanup with 1 hour threshold
+	removed := mgr.Cleanup(1 * time.Hour)
+
+	if removed != 1 {
+		t.Errorf("expected 1 job removed, got %d", removed)
+	}
+
+	// Verify queued job still exists
+	_, ok := mgr.Get(queued.ID)
+	if !ok {
+		t.Error("expected queued job to still exist")
+	}
+
+	// Verify completed job was removed
+	_, ok = mgr.Get(completed.ID)
+	if ok {
+		t.Error("expected old completed job to be removed")
+	}
+}
+
+// TestCleanupWithNoOldJobs verifies Cleanup returns 0 when no jobs are old enough.
+func TestCleanupWithNoOldJobs(t *testing.T) {
+	mgr := NewManager()
+
+	// Create a recently completed job
+	job := mgr.Submit("test", "agent")
+	_, cancel := context.WithCancel(context.Background())
+	mgr.Start(job.ID, cancel)
+	mgr.Complete(job.ID, "result")
+
+	// Cleanup with 1 hour threshold (job is brand new)
+	removed := mgr.Cleanup(1 * time.Hour)
+
+	if removed != 0 {
+		t.Errorf("expected 0 jobs removed, got %d", removed)
+	}
+
+	// Verify job still exists
+	_, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Error("expected job to still exist")
+	}
+}
+
+// TestJobSummary_ExcludesLogs verifies that Job.Summary() doesn't include logs.
+func TestJobSummary_ExcludesLogs(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test", "agent")
+
+	// Add many logs
+	for i := 0; i < 50; i++ {
+		mgr.AddLog(job.ID, "info", fmt.Sprintf("log %d", i))
+	}
+
+	// Get full job
+	fullJob, _ := mgr.Get(job.ID)
+	if len(fullJob.Logs) != 51 {
+		t.Errorf("expected 51 logs in full job, got %d", len(fullJob.Logs))
+	}
+
+	// Get summary
+	summaries := mgr.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+
+	// Summary should not have logs
+	// Note: Summary() is a method on Job, it returns JobSummary which doesn't have Logs field
+	if summaries[0].ID != job.ID {
+		t.Errorf("expected summary ID %s, got %s", job.ID, summaries[0].ID)
+	}
+}
+
+// TestConcurrentReadWrite verifies no race conditions with concurrent reads and writes.
+func TestConcurrentReadWrite(t *testing.T) {
+	mgr := NewManager()
+
+	// Create some initial jobs
+	for i := 0; i < 10; i++ {
+		mgr.Submit(fmt.Sprintf("initial-%d", i), "agent")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	// Writer goroutines
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				job := mgr.Submit(fmt.Sprintf("job-%d-%d", idx, j), "agent")
+				// Try to start and complete
+				_, c := context.WithCancel(ctx)
+				_ = mgr.Start(job.ID, c)
+				_ = mgr.Complete(job.ID, "done")
+			}
+		}(i)
+	}
+
+	// Reader goroutines
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				mgr.List()
+				mgr.Summaries()
+				summaries := mgr.Summaries()
+				for _, summary := range summaries {
+					mgr.Get(summary.ID)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// TestExecuteJob_ContextCancellationDuringExecution tests context cancellation propagates correctly.
+func TestExecuteJob_ContextCancellationDuringExecution(t *testing.T) {
+	mgr := NewManager()
+	job := mgr.Submit("test prompt", "agent")
+
+	execCtx, execCancel := context.WithCancel(context.Background())
+
+	executor := func(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+		// Wait for context cancellation
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	go ExecuteJob(execCtx, mgr, job.ID, executor)
+
+	// Give the executor time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the execution context
+	execCancel()
+
+	// Wait for cancellation to process
+	time.Sleep(200 * time.Millisecond)
+
+	retrieved, ok := mgr.Get(job.ID)
+	if !ok {
+		t.Fatal("job not found")
+	}
+
+	// The job should be canceled
+	if retrieved.Status != StatusCanceled {
+		t.Errorf("expected status %s, got %s", StatusCanceled, retrieved.Status)
 	}
 }
