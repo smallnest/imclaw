@@ -285,9 +285,9 @@ $codex_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-codex.log"
 
-    # 使用 acpx codex
+    # 使用 acpx codex (自动批准所有权限请求)
     cd "$PROJECT_ROOT"
-    acpx codex "$prompt" 2>&1 | tee "$log_file"
+    acpx --approve-all codex "$prompt" 2>&1 | tee "$log_file"
 
     # 检查是否有错误
     if grep -q "\[error\]" "$log_file" 2>/dev/null; then
@@ -357,9 +357,9 @@ $claude_instructions
 
     local log_file="$WORK_DIR/iteration-$iteration-claude.log"
 
-    # 使用 acpx claude
+    # 使用 acpx claude (自动批准所有权限请求)
     cd "$PROJECT_ROOT"
-    acpx claude "$prompt" 2>&1 | tee "$log_file"
+    acpx --approve-all claude "$prompt" 2>&1 | tee "$log_file"
 
     # 检查是否有错误
     if grep -q "\[error\]" "$log_file" 2>/dev/null; then
@@ -438,7 +438,7 @@ $claude_instructions
 
     cd "$PROJECT_ROOT"
     local review_result
-    review_result=$(acpx claude "$prompt" 2>&1 | tee "$log_file")
+    review_result=$(acpx --approve-all claude "$prompt" 2>&1 | tee "$log_file")
 
     # 检查是否有错误
     if grep -q "\[error\]" "$log_file" 2>/dev/null; then
@@ -521,7 +521,7 @@ $codex_instructions
 
     cd "$PROJECT_ROOT"
     local review_result
-    review_result=$(acpx codex "$prompt" 2>&1 | tee "$log_file")
+    review_result=$(acpx --approve-all codex "$prompt" 2>&1 | tee "$log_file")
 
     # 检查是否有错误
     if grep -q "\[error\]" "$log_file" 2>/dev/null; then
