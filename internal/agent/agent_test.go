@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -15,10 +16,52 @@ func collectStream(t *testing.T, stream <-chan StreamChunk) []StreamChunk {
 	return chunks
 }
 
+func TestBuildPromptArgsUsesResolvedPolicy(t *testing.T) {
+	opts := &PromptOptions{
+		PermissionPreset: "full-auto",
+		DeniedTools:      "Write",
+		Timeout:          12,
+	}
+	policy, err := resolvePromptPolicy(opts)
+	if err != nil {
+		t.Fatalf("resolvePromptPolicy() error = %v", err)
+	}
+
+	args, timeout, format := buildPromptArgs("codex", "sess-1", "hello", opts, policy, false)
+	if timeout != 12 {
+		t.Fatalf("timeout = %d, want 12", timeout)
+	}
+	if format != "text" {
+		t.Fatalf("format = %q, want text", format)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--approve-all") {
+		t.Fatalf("missing approve-all flag in %q", joined)
+	}
+	if strings.Contains(joined, "--allowed-tools Bash,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit,Read,TodoWrite,WebFetch,WebSearch,Write") || strings.Contains(joined, ",Write,") || strings.Contains(joined, ",Write ") || strings.Contains(joined, " Write,") {
+		t.Fatalf("denied tool leaked into args: %q", joined)
+	}
+}
+
+func TestAnnotatePermissionErrorIncludesPolicySummary(t *testing.T) {
+	policy, err := resolvePromptPolicy(&PromptOptions{PermissionPreset: "safe-readonly"})
+	if err != nil {
+		t.Fatalf("resolvePromptPolicy() error = %v", err)
+	}
+
+	msg := annotatePermissionError("exit status 5", policy)
+	if !strings.Contains(msg, "permission policy denied request") {
+		t.Fatalf("unexpected message: %q", msg)
+	}
+	if !strings.Contains(msg, "preset=safe-readonly") {
+		t.Fatalf("missing preset summary: %q", msg)
+	}
+}
+
 func TestRunCommandStreamReportsErrorAfterContent(t *testing.T) {
 	a := &ACPXAgent{command: "/bin/sh"}
 
-	stream, err := a.runCommandStream(context.Background(), 5, "-c", "printf foo; exit 5")
+	stream, err := a.runCommandStream(context.Background(), 5, nil, "-c", "printf foo; exit 5")
 	if err != nil {
 		t.Fatalf("runCommandStream returned error: %v", err)
 	}
@@ -44,7 +87,7 @@ func TestRunCommandStreamReportsErrorAfterContent(t *testing.T) {
 func TestRunCommandStreamPreservesPartialLineWithoutNewline(t *testing.T) {
 	a := &ACPXAgent{command: "/bin/sh"}
 
-	stream, err := a.runCommandStream(context.Background(), 5, "-c", "printf partial")
+	stream, err := a.runCommandStream(context.Background(), 5, nil, "-c", "printf partial")
 	if err != nil {
 		t.Fatalf("runCommandStream returned error: %v", err)
 	}

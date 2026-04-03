@@ -35,6 +35,24 @@ func (s stubAgent) PromptStream(ctx context.Context, sessionID, prompt string, o
 }
 func (s stubAgent) Close() error { return nil }
 
+func TestParsePromptOptionsIncludesPermissionPolicyFields(t *testing.T) {
+	opts := parsePromptOptions(map[string]interface{}{
+		"permission_preset":           "safe-readonly",
+		"allowed_tools":               "Read,Grep",
+		"denied_tools":                "Grep",
+		"non_interactive_permissions": "deny",
+	})
+	if opts.PermissionPreset != "safe-readonly" {
+		t.Fatalf("PermissionPreset = %q", opts.PermissionPreset)
+	}
+	if opts.AllowedTools != "Read,Grep" {
+		t.Fatalf("AllowedTools = %q", opts.AllowedTools)
+	}
+	if opts.DeniedTools != "Grep" {
+		t.Fatalf("DeniedTools = %q", opts.DeniedTools)
+	}
+}
+
 func TestApplyStreamChunkAggregatesContentWithoutDoneDuplication(t *testing.T) {
 	var fullContent strings.Builder
 	var streamErr string

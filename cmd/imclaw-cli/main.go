@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/event"
+	"github.com/smallnest/imclaw/internal/permission"
 	flag "github.com/spf13/pflag"
 )
 
@@ -37,9 +38,12 @@ var (
 	cwd = flag.StringP("cwd", "C", "", "Working directory")
 
 	// Permission flags
-	approveAll   = flag.Bool("approve-all", true, "Auto-approve all permission requests")
+	approveAll   = flag.Bool("approve-all", false, "Auto-approve all permission requests")
 	approveReads = flag.Bool("approve-reads", false, "Auto-approve read/search requests and prompt for writes")
 	denyAll      = flag.Bool("deny-all", false, "Deny all permission requests")
+
+	// Permission policy
+	permissionPreset = flag.String("permission-preset", "", "Permission preset: safe-readonly, dev-default, or full-auto")
 
 	// Auth policy
 	authPolicy = flag.String("auth-policy", "", "Authentication policy: skip or fail when auth is required")
@@ -57,7 +61,8 @@ var (
 	model = flag.String("model", "", "Agent model id")
 
 	// Tools
-	allowedTools = flag.String("allowed-tools", "Bash,Read,Write", "Allowed tool names (comma-separated). Empty=allow all, \"\"=no tools")
+	allowedTools = flag.String("allowed-tools", "", "Allowed tool names (comma-separated)")
+	deniedTools  = flag.String("denied-tools", "", "Denied tool names (comma-separated)")
 
 	// Session control
 	maxTurns      = flag.Int("max-turns", 0, "Maximum turns for the session")
@@ -72,9 +77,6 @@ var (
 	// Timeouts
 	timeout = flag.Int("timeout", 0, "Maximum time to wait for agent response (seconds)")
 	ttl     = flag.Int("ttl", 0, "Queue owner idle TTL before shutdown (seconds)")
-
-	// Verbose
-	verbose = flag.Bool("verbose", false, "Enable verbose debug logs")
 
 	// Version
 	showVersion = flag.BoolP("version", "v", false, "Show version information")
@@ -145,6 +147,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Validate parse-transcript requires text format (it parses transcript output)
+	if *parseTranscript && *format != "text" {
+		fmt.Fprintf(os.Stderr, "Error: --parse-transcript requires --format text\n")
+		fmt.Fprintf(os.Stderr, "Note: --parse-transcript parses transcript output into structured events\n")
+		os.Exit(1)
+	}
+
 	// Get message from --prompt flag or remaining args
 	var message string
 	if *promptFlag != "" {
@@ -168,16 +177,98 @@ func main() {
 	startREPL(client)
 }
 
-// getPermissions returns the permission mode based on flags
+// getPermissions returns the resolved permission mode based on flags.
 func getPermissions() string {
+	policy, err := resolvePolicyFromFlags()
+	if err != nil {
+		if *denyAll {
+			return "deny-all"
+		}
+		if *approveAll {
+			return "approve-all"
+		}
+		return "approve-reads"
+	}
+	return policy.Permissions
+}
+
+func resolvePolicyFromFlags() (*permission.ResolvedPolicy, error) {
+	permissions := ""
 	if *approveAll {
-		return "approve-all"
+		permissions = "approve-all"
+	}
+	if *approveReads {
+		permissions = "approve-reads"
 	}
 	if *denyAll {
-		return "deny-all"
+		permissions = "deny-all"
 	}
-	// approve-reads is default
-	return "approve-reads"
+	return permission.Resolve(permission.Policy{
+		PresetName:          *permissionPreset,
+		Permissions:         permissions,
+		AllowedTools:        *allowedTools,
+		DeniedTools:         *deniedTools,
+		AuthPolicy:          *authPolicy,
+		NonInteractivePerms: *nonInteractivePerms,
+	})
+}
+
+func buildPromptParams(content string, includeFormat bool) (map[string]interface{}, error) {
+	policy, err := resolvePolicyFromFlags()
+	if err != nil {
+		return nil, err
+	}
+
+	params := map[string]interface{}{
+		"content":     content,
+		"permissions": policy.Permissions,
+	}
+	if policy.PresetName != "" {
+		params["permission_preset"] = policy.PresetName
+	}
+	if includeFormat {
+		params["format"] = *format
+	}
+	if *sessionID != "" {
+		params["session_id"] = *sessionID
+	}
+	if *agentType != "" {
+		params["agent"] = *agentType
+	}
+	if *cwd != "" {
+		params["cwd"] = *cwd
+	}
+	if policy.AuthPolicy != "" {
+		params["auth_policy"] = policy.AuthPolicy
+	}
+	if policy.NonInteractivePerms != "" {
+		params["non_interactive_permissions"] = policy.NonInteractivePerms
+	}
+	if *suppressReads {
+		params["suppress_reads"] = true
+	}
+	if *model != "" {
+		params["model"] = *model
+	}
+	if allowed := policy.AllowedToolsCSV(); allowed != "" {
+		params["allowed_tools"] = allowed
+	}
+	if *deniedTools != "" {
+		params["denied_tools"] = *deniedTools
+	}
+	if *maxTurns > 0 {
+		params["max_turns"] = *maxTurns
+	}
+	if *promptRetries > 0 {
+		params["prompt_retries"] = *promptRetries
+	}
+	if *timeout > 0 {
+		params["timeout"] = *timeout
+	}
+	if *ttl > 0 {
+		params["ttl"] = *ttl
+	}
+	return params, nil
 }
 
 // JSONRPCRequest represents a JSON-RPC request
@@ -282,74 +373,9 @@ func (c *Client) Ask(content string) (*JSONRPCResponse, error) {
 		}
 	}
 
-	params := map[string]interface{}{
-		"content": content,
-	}
-
-	// Add session ID if specified
-	if *sessionID != "" {
-		params["session_id"] = *sessionID
-	}
-
-	// Add agent
-	if *agentType != "" {
-		params["agent"] = *agentType
-	}
-
-	// Add permissions
-	params["permissions"] = getPermissions()
-
-	// Add format
-	params["format"] = *format
-
-	// Add cwd
-	if *cwd != "" {
-		params["cwd"] = *cwd
-	}
-
-	// Add auth policy
-	if *authPolicy != "" {
-		params["auth_policy"] = *authPolicy
-	}
-
-	// Add non-interactive permissions
-	if *nonInteractivePerms != "" {
-		params["non_interactive_permissions"] = *nonInteractivePerms
-	}
-
-	// Add suppress reads
-	if *suppressReads {
-		params["suppress_reads"] = true
-	}
-
-	// Add model
-	if *model != "" {
-		params["model"] = *model
-	}
-
-	// Add allowed tools
-	if *allowedTools != "" {
-		params["allowed_tools"] = *allowedTools
-	}
-
-	// Add max turns
-	if *maxTurns > 0 {
-		params["max_turns"] = *maxTurns
-	}
-
-	// Add prompt retries
-	if *promptRetries > 0 {
-		params["prompt_retries"] = *promptRetries
-	}
-
-	// Add timeout
-	if *timeout > 0 {
-		params["timeout"] = *timeout
-	}
-
-	// Add ttl
-	if *ttl > 0 {
-		params["ttl"] = *ttl
+	params, err := buildPromptParams(content, true)
+	if err != nil {
+		return nil, err
 	}
 
 	req := JSONRPCRequest{
@@ -379,71 +405,9 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 		}
 	}
 
-	params := map[string]interface{}{
-		"content": content,
-	}
-
-	// Add session ID if specified
-	if *sessionID != "" {
-		params["session_id"] = *sessionID
-	}
-
-	// Add agent
-	if *agentType != "" {
-		params["agent"] = *agentType
-	}
-
-	// Add permissions
-	params["permissions"] = getPermissions()
-
-	// Add cwd
-	if *cwd != "" {
-		params["cwd"] = *cwd
-	}
-
-	// Add auth policy
-	if *authPolicy != "" {
-		params["auth_policy"] = *authPolicy
-	}
-
-	// Add non-interactive permissions
-	if *nonInteractivePerms != "" {
-		params["non_interactive_permissions"] = *nonInteractivePerms
-	}
-
-	// Add suppress reads
-	if *suppressReads {
-		params["suppress_reads"] = true
-	}
-
-	// Add model
-	if *model != "" {
-		params["model"] = *model
-	}
-
-	// Add allowed tools
-	if *allowedTools != "" {
-		params["allowed_tools"] = *allowedTools
-	}
-
-	// Add max turns
-	if *maxTurns > 0 {
-		params["max_turns"] = *maxTurns
-	}
-
-	// Add prompt retries
-	if *promptRetries > 0 {
-		params["prompt_retries"] = *promptRetries
-	}
-
-	// Add timeout
-	if *timeout > 0 {
-		params["timeout"] = *timeout
-	}
-
-	// Add ttl
-	if *ttl > 0 {
-		params["ttl"] = *ttl
+	params, err := buildPromptParams(content, true)
+	if err != nil {
+		return nil, err
 	}
 
 	reqID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -514,7 +478,7 @@ func (c *Client) AskStream(content string, onChunk func(chunkType, chunk string)
 	}
 
 	// Clear read deadline
-	c.conn.SetReadDeadline(time.Time{})
+	_ = c.conn.SetReadDeadline(time.Time{})
 
 	return &finalResp, nil
 }
@@ -609,6 +573,8 @@ func (c *Client) HTTPGet(path string) ([]byte, error) {
 }
 
 func writeStreamChunk(stdout, stderr io.Writer, chunkType, chunk string) {
+	// acpx already formats output based on --format flag
+	// Just pass through the content
 	if chunkType == "error" {
 		fmt.Fprintf(stderr, "[error] %s\n", chunk)
 	} else if chunkType == "content" {
@@ -719,7 +685,7 @@ func printCLIError(stderr io.Writer, message string) {
 	fmt.Fprintf(stderr, "Error: %s\n", message)
 
 	if shouldSuggestApproveAll(message) {
-		fmt.Fprintln(stderr, "Hint: this request likely needs tool execution permission. Retry with --approve-all.")
+		fmt.Fprintln(stderr, "Hint: this request likely needs broader tool permission. Retry with --permission-preset full-auto or --approve-all.")
 	}
 }
 
@@ -800,7 +766,11 @@ func startREPL(client *Client) {
 		}
 	}
 
-	fmt.Printf("Permissions: %s | Format: %s\n", getPermissions(), *format)
+	if policy, err := resolvePolicyFromFlags(); err == nil {
+		fmt.Printf("Permissions: %s | Format: %s\n", policy.Summary(), *format)
+	} else {
+		fmt.Printf("Permissions: %s | Format: %s\n", getPermissions(), *format)
+	}
 	if *cwd != "" {
 		fmt.Printf("Working directory: %s\n", *cwd)
 	}

@@ -144,14 +144,7 @@ func (h *uiHandler) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 	html := string(data)
 
 	// Add version query parameter to static assets for cache busting
-	version := BuildVersion
 	assetVersion := UIAssetsVersion
-	if version == "dev" || version == "unknown" {
-		version = BuildCommit
-	}
-	if version == "unknown" {
-		version = time.Now().Format("20060102150405") // Fallback to timestamp
-	}
 
 	// Replace asset URLs with versioned URLs
 	html = strings.Replace(html, `href="/assets/styles.css"`, fmt.Sprintf(`href="/assets/styles.css?v=%s"`, assetVersion), 1)

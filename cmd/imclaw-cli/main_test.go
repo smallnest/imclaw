@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/smallnest/imclaw/internal/agent"
@@ -46,6 +47,63 @@ func TestLooksLikeTranscript(t *testing.T) {
 	}
 }
 
+func TestResolvePolicyFromFlagsUsesPresetAndDenies(t *testing.T) {
+	*permissionPreset = "full-auto"
+	*allowedTools = ""
+	*deniedTools = "Write"
+	*approveAll = false
+	*approveReads = false
+	*denyAll = false
+	defer func() {
+		*permissionPreset = ""
+		*allowedTools = ""
+		*deniedTools = ""
+	}()
+
+	policy, err := resolvePolicyFromFlags()
+	if err != nil {
+		t.Fatalf("resolvePolicyFromFlags() error = %v", err)
+	}
+	if policy.Permissions != "approve-all" {
+		t.Fatalf("Permissions = %q, want approve-all", policy.Permissions)
+	}
+	allowed := strings.Split(policy.AllowedToolsCSV(), ",")
+	for _, tool := range allowed {
+		if tool == "Write" {
+			t.Fatalf("expected Write to be denied, got %q", policy.AllowedToolsCSV())
+		}
+	}
+}
+
+func TestBuildPromptParamsIncludesPolicyFields(t *testing.T) {
+	*permissionPreset = "safe-readonly"
+	*allowedTools = "Read,Grep"
+	*deniedTools = "Grep"
+	*authPolicy = "fail"
+	*nonInteractivePerms = "deny"
+	defer func() {
+		*permissionPreset = ""
+		*allowedTools = ""
+		*deniedTools = ""
+		*authPolicy = ""
+		*nonInteractivePerms = ""
+	}()
+
+	params, err := buildPromptParams("hello", true)
+	if err != nil {
+		t.Fatalf("buildPromptParams() error = %v", err)
+	}
+	if got := params["permission_preset"]; got != "safe-readonly" {
+		t.Fatalf("permission_preset = %#v", got)
+	}
+	if got := params["allowed_tools"]; got != "Read" {
+		t.Fatalf("allowed_tools = %#v, want Read", got)
+	}
+	if got := params["denied_tools"]; got != "Grep" {
+		t.Fatalf("denied_tools = %#v, want Grep", got)
+	}
+}
+
 func TestShouldSuggestApproveAll(t *testing.T) {
 	*approveAll = false
 	*approveReads = true
@@ -74,7 +132,7 @@ func TestPrintCLIErrorIncludesHint(t *testing.T) {
 	if !bytes.Contains([]byte(got), []byte("Error: Agent error: exit status 5\n")) {
 		t.Fatalf("missing main error line: %q", got)
 	}
-	if !bytes.Contains([]byte(got), []byte("Retry with --approve-all")) {
+	if !bytes.Contains([]byte(got), []byte("--permission-preset full-auto or --approve-all")) {
 		t.Fatalf("missing approve-all hint: %q", got)
 	}
 }
