@@ -47,6 +47,7 @@ type Job struct {
 	Status    JobStatus   `json:"status"`
 	Prompt    string      `json:"prompt"`
 	AgentName string      `json:"agent_name"`
+	Timeout   time.Duration `json:"timeout,omitempty"` // Timeout for job execution, 0 means no timeout
 	CreatedAt time.Time   `json:"created_at"`
 	StartedAt *time.Time  `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -65,13 +66,14 @@ type LogEntry struct {
 
 // JobSummary is a lightweight projection used by list APIs.
 type JobSummary struct {
-	ID         string    `json:"id"`
-	Status     JobStatus `json:"status"`
-	Prompt     string    `json:"prompt"`
-	AgentName  string    `json:"agent_name"`
-	CreatedAt  time.Time `json:"created_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ID         string        `json:"id"`
+	Status     JobStatus     `json:"status"`
+	Prompt     string        `json:"prompt"`
+	AgentName  string        `json:"agent_name"`
+	Timeout    time.Duration `json:"timeout,omitempty"`
+	CreatedAt  time.Time     `json:"created_at"`
+	StartedAt  *time.Time    `json:"started_at,omitempty"`
+	FinishedAt *time.Time    `json:"finished_at,omitempty"`
 }
 
 // Manager manages background jobs.
@@ -87,13 +89,14 @@ func NewManager() *Manager {
 	}
 }
 
-// newJob creates a new job with the given prompt and agent name.
-func newJob(prompt, agentName string) *Job {
+// newJob creates a new job with the given prompt, agent name, and timeout.
+func newJob(prompt, agentName string, timeout time.Duration) *Job {
 	return &Job{
 		ID:        uuid.New().String(),
 		Status:    StatusQueued,
 		Prompt:    prompt,
 		AgentName: agentName,
+		Timeout:   timeout,
 		CreatedAt: time.Now(),
 		Logs:      make([]LogEntry, 0),
 	}
@@ -106,6 +109,7 @@ func (j *Job) Summary() JobSummary {
 		Status:     j.Status,
 		Prompt:     j.Prompt,
 		AgentName:  j.AgentName,
+		Timeout:    j.Timeout,
 		CreatedAt:  j.CreatedAt,
 		StartedAt:  j.StartedAt,
 		FinishedAt: j.FinishedAt,
@@ -163,11 +167,11 @@ func (j *Job) transitionStatus(newStatus JobStatus) error {
 }
 
 // Submit submits a new job to the queue.
-func (m *Manager) Submit(prompt, agentName string) *Job {
+func (m *Manager) Submit(prompt, agentName string, timeout time.Duration) *Job {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	job := newJob(prompt, agentName)
+	job := newJob(prompt, agentName, timeout)
 	m.jobs[job.ID] = job
 	job.addLog("info", fmt.Sprintf("Job submitted: %s", job.ID))
 
@@ -383,6 +387,14 @@ func ExecuteJob(ctx context.Context, mgr *Manager, jobID string, executor func(c
 	jobCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Apply timeout if specified
+	if job.Timeout > 0 {
+		var timeoutCancel context.CancelFunc
+		jobCtx, timeoutCancel = context.WithTimeout(jobCtx, job.Timeout)
+		defer timeoutCancel()
+		mgr.AddLog(jobID, "info", fmt.Sprintf("Job timeout set to %v", job.Timeout))
+	}
+
 	// Start the job
 	if err := mgr.Start(jobID, cancel); err != nil {
 		mgr.Fail(jobID, err.Error())
@@ -399,6 +411,9 @@ func ExecuteJob(ctx context.Context, mgr *Manager, jobID string, executor func(c
 		if jobCtx.Err() == context.Canceled {
 			// Job was canceled
 			mgr.Cancel(jobID)
+		} else if jobCtx.Err() == context.DeadlineExceeded {
+			// Job timed out
+			mgr.Fail(jobID, fmt.Sprintf("Job execution timed out after %v", job.Timeout))
 		} else {
 			mgr.Fail(jobID, err.Error())
 		}
