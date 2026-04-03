@@ -30,7 +30,7 @@ fi
 
 # ==================== 配置 ====================
 DEFAULT_MAX_ITERATIONS=42
-PASSING_SCORE=8.5
+PASSING_SCORE=9.0
 MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
 MAX_RETRIES=10              # 退火重试最大次数
 RETRY_BASE_DELAY=2          # 退火重试初始等待时间（秒）
@@ -130,7 +130,7 @@ usage() {
     echo "  max_iterations   最大迭代次数 (默认: $DEFAULT_MAX_ITERATIONS)"
     echo ""
     echo "配置:"
-    echo "  PASSING_SCORE=8.5              达标评分线"
+    echo "  PASSING_SCORE=9.0              达标评分线"
     echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
     echo ""
     echo "自定义配置文件 (可选):"
