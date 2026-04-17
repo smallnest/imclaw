@@ -10,8 +10,11 @@
 # 检查 GitHub CLI
 gh auth status
 
-# 检查 acpx（Agent 控制工具）
-which acpx
+# 检查 Claude Code CLI
+which claude
+
+# 检查 OpenAI Codex CLI
+which codex
 
 # 检查 Go 环境
 go version
@@ -39,11 +42,10 @@ cd /path/to/your/github/project
 
 脚本会自动：
 1. 检查项目环境（git 仓库、GitHub remote）
-2. 创建 acpx session（如果不存在）
-3. 获取 Issue 信息
-4. 创建工作分支
-5. 循环执行 Codex 实现 → 测试 → Claude 审核
-6. 直到评分 ≥ 8.5 或达到最大迭代次数
+2. 获取 Issue 信息
+3. 创建工作分支
+4. 循环执行 Codex 实现 → 测试 → Claude 审核
+5. 直到评分 ≥ 8.5 或达到最大迭代次数
 
 ### 3. 自定义配置
 
@@ -69,27 +71,22 @@ cd /path/to/your/github/project
 如果需要手动控制每一步：
 
 ```bash
-# 1. 确保有 acpx session
-cd /path/to/your/project
-acpx codex sessions new
-acpx claude sessions new
-
-# 2. 查看 Issue
+# 1. 查看 Issue
 gh issue view 42
 
-# 3. 创建分支
+# 2. 创建分支
 git checkout -b feature/issue-42
 
-# 4. Codex 实现
-acpx codex "实现 Issue #42: [Issue标题]"
+# 3. Codex 实现
+codex --approval-mode full-auto "实现 Issue #42: [Issue标题]"
 
-# 5. 运行测试
+# 4. 运行测试
 go test ./...
 
-# 6. Claude 审核
-acpx claude "审核 Issue #42 的实现"
+# 5. Claude 审核
+claude -p "审核 Issue #42 的实现" --dangerously-skip-permissions
 
-# 7. 如果评分 < 8.5，让 Codex 改进，然后重复 5-6
+# 6. 如果评分 < 8.5，让 Codex 改进，然后重复 4-5
 ```
 
 ## 文件说明

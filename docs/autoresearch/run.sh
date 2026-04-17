@@ -94,12 +94,19 @@ run_with_retry() {
         log "调用 $agent (尝试 $retry/$MAX_RETRIES)..."
 
         # 执行命令
-        if acpx --approve-all $agent "$prompt" 2>&1 | tee "$log_file"; then
+        local exit_code=1
+        if [ "$agent" = "codex" ]; then
+            codex exec --full-auto "$prompt" 2>&1 | tee "$log_file" && exit_code=0
+        else
+            claude -p "$prompt" --dangerously-skip-permissions 2>&1 | tee "$log_file" && exit_code=0
+        fi
+
+        if [ $exit_code -eq 0 ]; then
             # 检查是否有错误
-            if ! grep -q "\[error\]" "$log_file" 2>/dev/null; then
+            if ! grep -qi "error" "$log_file" 2>/dev/null; then
                 # 检查是否有实际输出
                 local content_lines
-                content_lines=$(grep -v "^\[acpx\]" "$log_file" | grep -v "^\[client\]" "$log_file" | grep -v "^\[error\]" "$log_file" | grep -v "^$" | wc -l)
+                content_lines=$(grep -v "^$" "$log_file" | wc -l)
                 if [ "$content_lines" -ge 5 ]; then
                     success=1
                     break
@@ -181,8 +188,13 @@ check_dependencies() {
         missing=1
     fi
 
-    if ! command -v acpx &> /dev/null; then
-        error "acpx 未安装，请先安装 acpx"
+    if ! command -v claude &> /dev/null; then
+        error "claude (Claude Code CLI) 未安装"
+        missing=1
+    fi
+
+    if ! command -v codex &> /dev/null; then
+        error "codex (OpenAI Codex CLI) 未安装"
         missing=1
     fi
 
@@ -196,29 +208,6 @@ check_dependencies() {
     fi
 
     log "依赖检查通过"
-}
-
-ensure_acpx_session() {
-    log "准备 acpx session..."
-
-    cd "$PROJECT_ROOT"
-
-    # 先关闭可能存在的旧 session（避免缓存旧配置）
-    log "关闭旧 session..."
-    acpx codex sessions close 2>/dev/null || true
-    acpx claude sessions close 2>/dev/null || true
-
-    sleep 1
-
-    # 创建新的 codex session
-    log "创建 codex session..."
-    acpx codex sessions new 2>&1
-
-    # 创建新的 claude session
-    log "创建 claude session..."
-    acpx claude sessions new 2>&1
-
-    log "acpx session 准备完成"
 }
 
 get_issue_info() {
@@ -379,7 +368,7 @@ run_claude() {
 
     log "迭代 $iteration: Claude 实现..."
 
-    # 获取 claude 指令文件（作为实现者）
+    # 获取 claude 指令文件
     local claude_instructions_file
     claude_instructions_file=$(get_agent_instructions "claude")
 
@@ -400,7 +389,7 @@ Issue 内容: $ISSUE_BODY
 迭代次数: $iteration
 
 ---
-请作为实现者执行（参考 codex.md 的实现者角色）:
+请实现以下功能:
 $claude_instructions
 "
     else
@@ -413,7 +402,7 @@ Issue 标题: $ISSUE_TITLE
 $previous_feedback
 
 ---
-请作为实现者执行改进:
+请根据反馈修复代码:
 $claude_instructions
 "
     fi
@@ -547,7 +536,7 @@ run_codex_review() {
 
     log "迭代 $iteration: Codex 审核..."
 
-    # 获取 codex 指令文件（作为审核者）
+    # 获取 codex 指令文件
     local codex_instructions_file
     codex_instructions_file=$(get_agent_instructions "codex")
 
@@ -563,7 +552,7 @@ run_codex_review() {
 Issue 标题: $ISSUE_TITLE
 
 ---
-请作为审核者执行审核（参考 claude.md 的审核者角色），给出评分和改进建议:
+请审核代码并给出评分和改进建议:
 $codex_instructions
 "
 
@@ -699,15 +688,16 @@ get_issue_info "$ISSUE_NUMBER"
 # 设置工作目录
 setup_work_directory "$ISSUE_NUMBER"
 
-# 确保 acpx session 存在 (仅用于 claude)
-ensure_acpx_session
-
 # 创建分支
 create_branch "$ISSUE_NUMBER"
 
-# 迭代循环（轮流模式）
-# 奇数轮: Codex 实现 → Claude 审核
-# 偶数轮: Claude 实现 → Codex 审核
+# 迭代循环
+# 迭代 1:  Codex 实现
+# 迭代 2:  Claude 审核 + 评分 (未达标则修复)
+# 迭代 3:  Codex 审核 + 修复 (如有必要)
+# 迭代 4:  Claude 审核 + 修复 (如有必要)
+# ...
+# 直到评分 >= PASSING_SCORE 或达到最大迭代次数
 ITERATION=0
 PREVIOUS_FEEDBACK=""
 FINAL_SCORE=0
@@ -719,117 +709,153 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     log ""
     log "=========================================="
     log "迭代 $ITERATION/$MAX_ITERATIONS"
-    # 判断奇偶轮
-    if [ $((ITERATION % 2)) -eq 1 ]; then
-        log "本轮: Codex 实现 → Claude 审核"
+    if [ $ITERATION -eq 1 ]; then
+        log "本轮: Codex 初始实现"
+    elif [ $((ITERATION % 2)) -eq 0 ]; then
+        log "本轮: Claude 审核 + 修复"
     else
-        log "本轮: Claude 实现 → Codex 审核"
+        log "本轮: Codex 审核 + 修复"
     fi
     log "=========================================="
 
-    # 根据奇偶轮选择实现者
-    if [ $((ITERATION % 2)) -eq 1 ]; then
-        # 奇数轮: Codex 实现
-        if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$PREVIOUS_FEEDBACK"; then
-            CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
-            log "Codex 执行失败 (连续失败: $CONSECUTIVE_FAILURES/$MAX_CONSECUTIVE_FAILURES)"
-
-            if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
-                error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
-                error "请检查 acpx codex 配置"
-
-                record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
-                exit 1
-            fi
-
-            log "等待 10 秒后重试..."
-            sleep 10
-            continue
-        fi
-    else
-        # 偶数轮: Claude 实现
-        if ! run_claude "$ISSUE_NUMBER" "$ITERATION" "$PREVIOUS_FEEDBACK"; then
-            CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
-            log "Claude 执行失败 (连续失败: $CONSECUTIVE_FAILURES/$MAX_CONSECUTIVE_FAILURES)"
-
-            if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
-                error "连续失败 $CONSECUTIVE_FAILURES 次，停止运行"
-                error "请检查 acpx claude 配置"
-
-                record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
-                exit 1
-            fi
-
-            log "等待 10 秒后重试..."
-            sleep 10
-            continue
-        fi
-    fi
-
-    # 实现成功，重置连续失败计数
     CONSECUTIVE_FAILURES=0
 
-    # 运行测试
-    if ! run_tests "$ITERATION"; then
-        PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+    # ---- 迭代 1: Codex 初始实现 ----
+    if [ $ITERATION -eq 1 ]; then
+        if ! run_codex "$ISSUE_NUMBER" "$ITERATION" ""; then
+            error "Codex 初始实现失败"
+            record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
+            exit 1
+        fi
+
+        # 运行测试
+        if ! run_tests "$ITERATION"; then
+            log "初始实现测试失败，继续下一轮审核修复"
+            PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+        fi
+
+        # 初始实现后不评分，直接进入下一轮
+        PREVIOUS_FEEDBACK="初始实现完成，请审核代码质量并给出评分。如果有问题请直接修复。"
         continue
     fi
 
-    # 根据奇偶轮选择审核者
-    if [ $((ITERATION % 2)) -eq 1 ]; then
-        # 奇数轮: Claude 审核
-        run_claude_review "$ISSUE_NUMBER" "$ITERATION"
+    # ---- 偶数轮: Claude 审核 + 修复 ----
+    if [ $((ITERATION % 2)) -eq 0 ]; then
+        # Claude 审核
+        if ! run_claude_review "$ISSUE_NUMBER" "$ITERATION"; then
+            CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+            log "Claude 审核失败"
+            sleep 10
+            ITERATION=$((ITERATION - 1))  # 重试本轮
+            continue
+        fi
+
         REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-claude-review.log"
-    else
-        # 偶数轮: Codex 审核
-        run_codex_review "$ISSUE_NUMBER" "$ITERATION"
-        REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-codex-review.log"
+        SCORE=$(get_last_score)
+        FINAL_SCORE=$SCORE
+
+        if check_score_passed "$SCORE"; then
+            log "审核通过！评分: $SCORE/10 (达标线: $PASSING_SCORE)"
+            break
+        fi
+
+        log "评分未达标 ($SCORE/$PASSING_SCORE)，Claude 根据反馈修复..."
+
+        # Claude 根据审核反馈修复
+        REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
+        if ! run_claude "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
+            log "Claude 修复失败，继续下一轮"
+            PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
+            continue
+        fi
+
+        # 修复后运行测试
+        if ! run_tests "$ITERATION"; then
+            PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+        else
+            PREVIOUS_FEEDBACK=""
+        fi
+
+        continue
     fi
 
+    # ---- 奇数轮 (>=3): Codex 审核 + 修复 ----
+    if ! run_codex_review "$ISSUE_NUMBER" "$ITERATION"; then
+        CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+        log "Codex 审核失败"
+        sleep 10
+        ITERATION=$((ITERATION - 1))  # 重试本轮
+        continue
+    fi
+
+    REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-codex-review.log"
     SCORE=$(get_last_score)
     FINAL_SCORE=$SCORE
 
-    # 检查是否通过（支持小数评分）
     if check_score_passed "$SCORE"; then
         log "审核通过！评分: $SCORE/10 (达标线: $PASSING_SCORE)"
+        break
+    fi
 
-        record_final_result "$ISSUE_NUMBER" "completed" "$ITERATION" "$SCORE"
+    log "评分未达标 ($SCORE/$PASSING_SCORE)，Codex 根据反馈修复..."
 
-        echo ""
-        log "=========================================="
-        log "处理完成！"
-        log "=========================================="
-        log "分支: $BRANCH_NAME"
-        log "评分: $SCORE/10"
-        log "迭代次数: $ITERATION"
+    # Codex 根据审核反馈修复
+    REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
+    if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
+        log "Codex 修复失败，继续下一轮"
+        PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
+        continue
+    fi
 
-        # 自动提交 PR 并合并
-        log ""
-        log "=========================================="
-        log "自动提交 PR 并合并..."
-        log "=========================================="
+    # 修复后运行测试
+    if ! run_tests "$ITERATION"; then
+        PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+    else
+        PREVIOUS_FEEDBACK=""
+    fi
 
-        cd "$PROJECT_ROOT"
+    continue
+done
 
-        # 提交所有更改
-        log "提交更改..."
-        git add -A
-        git commit -m "feat: implement issue #$ISSUE_NUMBER - $ISSUE_TITLE
+# ---- 判断最终结果 ----
+if check_score_passed "$FINAL_SCORE"; then
+    record_final_result "$ISSUE_NUMBER" "completed" "$ITERATION" "$FINAL_SCORE"
 
-Implemented by autoresearch with score $SCORE/10 after $ITERATION iterations.
+    echo ""
+    log "=========================================="
+    log "处理完成！"
+    log "=========================================="
+    log "分支: $BRANCH_NAME"
+    log "评分: $FINAL_SCORE/10"
+    log "迭代次数: $ITERATION"
+
+    # 自动提交 PR 并合并
+    log ""
+    log "=========================================="
+    log "自动提交 PR 并合并..."
+    log "=========================================="
+
+    cd "$PROJECT_ROOT"
+
+    # 提交所有更改
+    log "提交更改..."
+    git add -A
+    git commit -m "feat: implement issue #$ISSUE_NUMBER - $ISSUE_TITLE
+
+Implemented by autoresearch with score $FINAL_SCORE/10 after $ITERATION iterations.
 
 Closes #$ISSUE_NUMBER" 2>/dev/null || log "没有需要提交的更改"
 
-        # 推送分支
-        log "推送分支 $BRANCH_NAME..."
-        git push -u origin "$BRANCH_NAME"
+    # 推送分支
+    log "推送分支 $BRANCH_NAME..."
+    git push -u origin "$BRANCH_NAME"
 
-        # 创建 PR
-        log "创建 Pull Request..."
-        PR_URL=$(gh pr create --title "feat: $ISSUE_TITLE (#$ISSUE_NUMBER)" --body "$(cat <<EOF
+    # 创建 PR
+    log "创建 Pull Request..."
+    PR_URL=$(gh pr create --title "feat: $ISSUE_TITLE (#$ISSUE_NUMBER)" --body "$(cat <<EOF
 ## Summary
 - Implements #$ISSUE_NUMBER
-- Score: $SCORE/10
+- Score: $FINAL_SCORE/10
 - Iterations: $ITERATION
 
 ## Test plan
@@ -840,33 +866,27 @@ Closes #$ISSUE_NUMBER
 EOF
 )" 2>&1)
 
-        if echo "$PR_URL" | grep -q "https://github.com"; then
-            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-            log "PR 已创建: $PR_URL"
+    if echo "$PR_URL" | grep -q "https://github.com"; then
+        PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+        log "PR 已创建: $PR_URL"
 
-            # 合并 PR
-            log "合并 PR #$PR_NUMBER..."
-            gh pr merge "$PR_NUMBER" --merge --delete-branch
+        # 合并 PR
+        log "合并 PR #$PR_NUMBER..."
+        gh pr merge "$PR_NUMBER" --merge --delete-branch
 
-            log ""
-            log "=========================================="
-            log "完成！Issue #$ISSUE_NUMBER 已自动处理"
-            log "=========================================="
-            log "PR: $PR_URL"
-            log "状态: 已合并"
-        else
-            log "警告: PR 创建失败或已存在"
-            log "$PR_URL"
-        fi
-
-        exit 0
+        log ""
+        log "=========================================="
+        log "完成！Issue #$ISSUE_NUMBER 已自动处理"
+        log "=========================================="
+        log "PR: $PR_URL"
+        log "状态: 已合并"
+    else
+        log "警告: PR 创建失败或已存在"
+        log "$PR_URL"
     fi
 
-    log "评分未达标 ($SCORE/$PASSING_SCORE)，准备下一轮迭代..."
-
-    # 获取审核结果作为下次反馈
-    PREVIOUS_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
-done
+    exit 0
+fi
 
 # 达到最大迭代次数
 log ""
