@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/creack/pty"
+	"github.com/smallnest/imclaw/internal/metrics"
 	"github.com/smallnest/imclaw/internal/permission"
 )
 
@@ -445,11 +446,21 @@ func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts
 	args, timeout, format := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, false)
 
 	log.Printf("[acpx] Sending prompt to session %s (%s, format=%s)", sessionID, policy.Summary(), format)
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+	log.Printf("[acpx] Prompt: %s", metrics.Truncate(prompt, 200))
 
+	start := time.Now()
 	response, err := a.runCommand(ctx, timeout, args...)
+	metrics.Default().Latency(metrics.AgentExecDuration).Since(start)
 	if err != nil {
-		return "", fmt.Errorf("%s", annotatePermissionError(err.Error(), policy))
+		annotated := annotatePermissionError(err.Error(), policy)
+		if isPermissionError(err.Error()) {
+			metrics.Default().Counter(metrics.PermissionDenials).Inc()
+			metrics.LogEvent("permission.denied", sessionID, "", map[string]interface{}{
+				"agent":  a.agentType,
+				"policy": policy.Summary(),
+			})
+		}
+		return "", fmt.Errorf("%s", annotated)
 	}
 	return response, nil
 }
@@ -464,9 +475,33 @@ func (a *ACPXAgent) doPromptStream(ctx context.Context, sessionID, prompt string
 	args, timeout, _ := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, true)
 
 	log.Printf("[acpx] Streaming prompt to session %s (%s)", sessionID, policy.Summary())
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+	log.Printf("[acpx] Prompt: %s", metrics.Truncate(prompt, 200))
 
-	return a.runCommandStream(ctx, timeout, policy, args...)
+	streamStart := time.Now()
+	ch, err := a.runCommandStream(ctx, timeout, policy, args...)
+	if err != nil {
+		if isPermissionError(err.Error()) {
+			metrics.Default().Counter(metrics.PermissionDenials).Inc()
+			metrics.LogEvent("permission.denied", sessionID, "", map[string]interface{}{
+				"agent":  a.agentType,
+				"policy": policy.Summary(),
+			})
+		}
+		metrics.Default().Counter(metrics.AgentExecFailures).Inc()
+		return nil, err
+	}
+
+	// Wrap the channel to track duration when stream completes
+	wrappedCh := make(chan StreamChunk, 200)
+	go func() {
+		defer close(wrappedCh)
+		for chunk := range ch {
+			wrappedCh <- chunk
+		}
+		metrics.Default().Latency(metrics.AgentExecDuration).Since(streamStart)
+	}()
+
+	return wrappedCh, nil
 }
 
 func resolvePromptPolicy(opts *PromptOptions) (*permission.ResolvedPolicy, error) {
@@ -545,11 +580,15 @@ func annotatePermissionError(message string, policy *permission.ResolvedPolicy) 
 	if policy == nil {
 		return message
 	}
-	lower := strings.ToLower(message)
-	if strings.Contains(lower, "permission") || strings.Contains(lower, "exit status 5") || strings.Contains(lower, "refused") {
+	if isPermissionError(message) {
 		return fmt.Sprintf("permission policy denied request (%s): %s", policy.Summary(), message)
 	}
 	return message
+}
+
+func isPermissionError(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "permission") || strings.Contains(lower, "exit status 5") || strings.Contains(lower, "refused")
 }
 
 // runCommandStream executes command and streams the output
@@ -1013,14 +1052,6 @@ func startsWithProtocolWhitespace(s string) bool {
 	}
 	r, _ := utf8.DecodeRuneInString(s)
 	return unicode.IsSpace(r)
-}
-
-// truncate truncates a string to maxLen characters
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 // Close closes the agent

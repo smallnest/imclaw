@@ -1,0 +1,204 @@
+Now I have all the information needed for a comprehensive review. Here's my assessment:
+
+---
+
+## 审核报告
+
+### Issue
+- 编号: #11
+- 标题: feat: add observability for sessions, tools, and agent execution
+- 迭代次数: 1
+
+---
+
+### 总体评价
+
+**评分: 82/100**
+
+实现结构清晰，metrics 包设计简洁实用，正确覆盖了 Issue 要求的所有可观测性维度。主要问题集中在 LatencyTracker 的内存无上限增长和并发安全问题。
+
+---
+
+### 严重问题 (必须修复)
+
+#### 问题 1: LatencyTracker 无界内存增长
+
+**位置**: `internal/metrics/metrics.go:47-48`
+
+**问题描述**:
+`LatencyTracker.samples` 是一个无限增长的 slice，每次 `Observe` 都 append 一个元素，永远不会被清理。在生产环境中长期运行的服务器会持续积累 latency 样本，导致内存泄漏。比如一个高频调用的 API 每秒 1000 次请求，一天就会积累 8640 万条 `time.Duration`（每条 8 字节），约 700MB。
+
+**代码片段**:
+```go
+type LatencyTracker struct {
+    name    string
+    mu      sync.Mutex
+    samples []time.Duration  // 无界增长
+}
+
+func (lt *LatencyTracker) Observe(d time.Duration) {
+    lt.mu.Lock()
+    lt.samples = append(lt.samples, d)  // 只增不删
+    lt.mu.Unlock()
+}
+```
+
+**建议修复**:
+使用固定大小的环形缓冲区（ring buffer）或滑动窗口，只保留最近 N 个样本。例如：
+
+```go
+const maxSamples = 1000
+
+type LatencyTracker struct {
+    name    string
+    mu      sync.Mutex
+    samples []time.Duration
+    head    int  // 环形写入位置
+    full    bool // 是否已写满一圈
+}
+
+func (lt *LatencyTracker) Observe(d time.Duration) {
+    lt.mu.Lock()
+    if len(lt.samples) < maxSamples {
+        lt.samples = append(lt.samples, d)
+    } else {
+        lt.samples[lt.head] = d
+        lt.head = (lt.head + 1) % maxSamples
+        lt.full = true
+    }
+    lt.mu.Unlock()
+    log.Printf("[metrics] latency %s duration_ms=%.2f", lt.name, float64(d)/float64(time.Millisecond))
+}
+```
+
+**原因**: 长期运行的服务会因 metrics 累积而 OOM，这是一个生产环境致命问题。
+
+---
+
+#### 问题 2: LatencyTracker.Summary 持锁时间过长
+
+**位置**: `internal/metrics/metrics.go:67-74`
+
+**问题描述**:
+`Summary()` 在持有互斥锁的同时拷贝所有样本，然后释放锁。虽然拷贝比在锁内计算要好，但对于大样本集（与问题 1 相关），拷贝本身就会阻塞所有 `Observe` 调用较长时间。结合问题 1 的修复（环形缓冲区），拷贝量有上限，此问题会自然缓解。
+
+**原因**: 高频采样场景下，Snapshot 调用会阻塞所有延迟记录。
+
+---
+
+### 一般问题 (建议修复)
+
+#### 问题 3: SessionActive gauge 使用 Set 而非 Inc/Dec，语义不准确
+
+**位置**: `internal/gateway/server.go:1103`
+
+**问题描述**:
+`session.active_count` 在 `recordPrompt` 中用 `Set(int64(len(s.sessionMgr.Summaries())))` 设置值。但 `Summaries()` 返回所有会话的摘要，不只是活跃会话。另外，session 删除时（`handleSessionDelete`）没有更新这个 gauge，导致值不一致。
+
+**代码片段**:
+```go
+metrics.Default().Gauge(metrics.SessionActive).Set(int64(len(s.sessionMgr.Summaries())))
+```
+
+**建议修复**:
+1. 在 session 删除时也更新 gauge（使用 `SessionDeleted` counter 对应的位置）
+2. 如果 `Summaries()` 返回的是全部 session 而非活跃 session，metric 名称应考虑改为 `session.total_count`
+
+**原因**: gauge 值在删除 session 后会过时，与实际状态不一致。
+
+---
+
+#### 问题 4: session.deleted counter 已定义但未使用
+
+**位置**: `internal/metrics/metrics.go:220`
+
+**问题描述**:
+`SessionDeleted` 常量已定义，但 `handleSessionDelete` 中从未调用 `metrics.Default().Counter(metrics.SessionDeleted).Inc()`。
+
+**建议修复**:
+在 `handleSessionDelete` 中添加：
+```go
+metrics.Default().Counter(metrics.SessionDeleted).Inc()
+```
+
+**原因**: 定义了但不使用的 metric 会误导使用者认为该指标可观测。
+
+---
+
+#### 问题 5: truncate 函数在两个包中重复定义
+
+**位置**: `internal/agent/agent.go:1058-1063`, `internal/gateway/server.go:1348-1353`
+
+**问题描述**:
+完全相同的 `truncate` 函数在 `agent` 和 `gateway` 两个包中各定义了一份。
+
+**建议修复**:
+将 `truncate` 移到 `internal/metrics` 包中并导出，或放在一个共享的 util 包中。或保持现状但添加注释说明两处使用。
+
+**原因**: 代码重复，维护时容易遗漏同步更新。
+
+---
+
+#### 问题 6: toolStartTimes map 无清理机制
+
+**位置**: `internal/gateway/server.go:963`
+
+**问题描述**:
+`toolStartTimes := make(map[string]time.Time)` 在 `handleAskStream` 中创建，用于追踪 tool 调用时长。但如果 stream 提前中断（连接断开等），某些 tool 的 start time 会被记录但对应的 end 事件不会到来，导致 `toolStartTimes` 中的条目泄漏（不过因为是局部变量，函数返回后会 GC，所以影响有限）。
+
+**建议**: 这是轻微问题，局部变量作用域有限。但如果未来重构为持久化追踪，需注意清理。
+
+---
+
+#### 问题 7: LatencySummary 包含完整 Samples slice
+
+**位置**: `internal/metrics/metrics.go:87`
+
+**问题描述**:
+`LatencySummary.Samples` 字段暴露了所有原始样本。通过 `Snapshot()` 返回时，这会导致大量内存拷贝（同样与问题 1 相关）。
+
+**建议修复**:
+考虑移除 `Samples` 字段，或改为可选。大多数消费者只需要聚合统计（count, p50, p95, p99），不需要原始数据。
+
+**原因**: 暴露所有样本有内存开销，且 `Snapshot()` 会拷贝全部数据。
+
+---
+
+### 建议改进 (可选)
+
+- **Counter.Add 负数问题**: `Counter.Add(n)` 接受 `int64`，传入负数会让 counter 减小，但 counter 语义上应该只增不减。可以添加 `n < 0` 的保护或文档说明。
+- **LogEvent extra 参数 map 顺序不确定**: Go map 迭代顺序随机，导致 `LogEvent` 输出中 extra 字段的顺序不一致，不利于日志解析。可考虑排序 key 后输出。
+- **并发测试**: metrics 包的测试没有覆盖并发场景（多个 goroutine 同时 Inc/Observe），可以添加 `go test -race` 验证。
+- **Percentile 计算精度**: 当前使用 `sorted[n*50/100]` 的方式，对于小样本集（如 n=3）可能不够精确，但对于此项目的可观测性需求足够。
+
+---
+
+### 审核维度评分
+
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 正确性 | 75 | LatencyTracker 无界增长是生产级问题；SessionActive gauge 不一致；SessionDeleted 未使用 |
+| 测试质量 | 90 | 96.7% 覆盖率，核心逻辑都有测试，缺少并发测试 |
+| 代码质量 | 85 | 代码结构清晰，命名规范，有重复的 truncate 函数 |
+| 安全性 | 95 | 无安全风险，仅限内部可观测性 |
+| 性能 | 60 | LatencyTracker 无界增长 + 持锁拷贝，长期运行有内存和延迟风险 |
+
+### 综合评分
+
+```
+总分 = 75 × 0.35 + 90 × 0.25 + 85 × 0.20 + 95 × 0.10 + 60 × 0.10
+     = 26.25 + 22.5 + 17.0 + 9.5 + 6.0
+     = 81.25 ≈ 82
+```
+
+---
+
+### 审核结论
+
+- [x] 需要修改 - 存在必须修复的问题
+
+**下一步行动**:
+1. **必须**: 修复 LatencyTracker 无界内存增长（使用环形缓冲区或限制样本数）
+2. **必须**: 在 `handleSessionDelete` 中使用 `SessionDeleted` counter
+3. **建议**: 修正 `SessionActive` gauge 的更新逻辑，确保删除 session 时也更新
+4. **建议**: 去重 `truncate` 函数
