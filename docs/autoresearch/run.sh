@@ -941,6 +941,8 @@ run_review_and_fix() {
         log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
         CONSECUTIVE_ITERATION_FAILURES=0
         PASSED=1
+        # 保存最终审核报告用于 Issue 评论
+        FINAL_REVIEW_REPORT=$(cat "$REVIEW_LOG_FILE" 2>/dev/null || echo "")
         return
     fi
 
@@ -1078,6 +1080,14 @@ EOF
 
         # 添加评论到 Issue
         log "添加评论到 Issue #$ISSUE_NUMBER..."
+        FINAL_REVIEW_SECTION=""
+        if [ -n "$FINAL_REVIEW_REPORT" ]; then
+            FINAL_REVIEW_SECTION="
+---
+
+$FINAL_REVIEW_REPORT
+"
+        fi
         gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
 ## 自动处理完成
 
@@ -1085,7 +1095,7 @@ EOF
 - **评分**: $FINAL_SCORE/100
 - **迭代次数**: $ITERATION
 - **实现方式**: autoresearch 多 agent 迭代 (${AGENT_NAMES[@]})
-
+${FINAL_REVIEW_SECTION}
 该 Issue 已由 autoresearch 自动实现、审核并合并。
 EOF
 )" 2>/dev/null || log "警告: 添加评论失败"
