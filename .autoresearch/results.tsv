@@ -1,4 +1,0 @@
-2026-04-18T12:14:54+08:00	9	feat: support multiple subscribers for the same live session	completed	2	true	88	88	feature/issue-9	
-2026-04-18T16:16:12+08:00	11	feat: add observability for sessions, tools, and agent execution	agent_failed	4	true	82	82	feature/issue-11	
-2026-04-18T16:39:53+08:00	11	feat: add observability for sessions, tools, and agent execution	agent_failed	6	true	0	0	feature/issue-11	
-2026-04-18T17:01:56+08:00	11	feat: add observability for sessions, tools, and agent execution	completed	7	true	86	86	feature/issue-11	

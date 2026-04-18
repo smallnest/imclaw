@@ -2,6 +2,9 @@
 
 IMClaw 是一个支持 ACP 协议的 AI Agent 网关，通过 CLI 与 Agent 交互。
 
+**重要**:
+本项目演化出来的 autoresearch 独立成一个单独的项目:[smallnest/autoresearch](https://github.com/smallnest/autoresearch), 更智能更强大。
+
 ## 功能特性
 
 - **ACP 协议**: 通过 acpx 支持 Claude、Codex 等 AI Agent
