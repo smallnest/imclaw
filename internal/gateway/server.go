@@ -111,6 +111,9 @@ func (s *Server) startServer(ctx context.Context) {
 	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 	mux.HandleFunc("/api/auth/verify", s.handleAuthVerify)
 	mux.HandleFunc("/api/sessions", s.handleSessionsAPI)
+	mux.HandleFunc("/api/sessions/export/", s.handleSessionExportAPI)
+	mux.HandleFunc("/api/sessions/import", s.handleSessionImportAPI)
+	mux.HandleFunc("/api/sessions/archive/", s.handleSessionArchiveAPI)
 	mux.HandleFunc("/api/sessions/", s.handleSessionDetailAPI)
 	mux.HandleFunc("/api/agents", s.handleAgentsAPI)
 	mux.HandleFunc("/api/jobs", s.handleJobsAPI)
@@ -235,8 +238,17 @@ func (s *Server) handleSessionsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tag := r.URL.Query().Get("tag")
+	includeArchived := r.URL.Query().Get("archived") == "true"
+
+	var summaries []session.SessionSummary
+	if tag != "" || !includeArchived {
+		summaries = s.sessionMgr.SummariesFiltered(tag, includeArchived)
+	} else {
+		summaries = s.sessionMgr.Summaries()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	summaries := s.sessionMgr.Summaries()
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"sessions": summaries,
 		"count":    len(summaries),
@@ -260,25 +272,59 @@ func sessionChannelFromParams(params map[string]interface{}) string {
 }
 
 func (s *Server) handleSessionDetailAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	if sessionID == "" {
 		http.NotFound(w, r)
 		return
 	}
+	channel := sessionChannelFromRequest(r)
 
-	sess, ok := s.sessionMgr.Get(sessionChannelFromRequest(r), sessionID)
-	if !ok {
-		http.NotFound(w, r)
-		return
+	switch r.Method {
+	case http.MethodGet:
+		sess, ok := s.sessionMgr.Get(channel, sessionID)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sess)
+
+	case http.MethodPatch:
+		var req struct {
+			Name       *string  `json:"name,omitempty"`
+			Tags       []string `json:"tags,omitempty"`
+			AddTags    []string `json:"add_tags,omitempty"`
+			RemoveTags []string `json:"remove_tags,omitempty"`
+			Archived   *bool    `json:"archived,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "invalid request"})
+			return
+		}
+
+		updates := session.SessionUpdates{
+			Name:       req.Name,
+			AddTags:    req.AddTags,
+			RemoveTags: req.RemoveTags,
+			Archived:   req.Archived,
+		}
+		if req.Tags != nil {
+			updates.SetTags = req.Tags
+		}
+		sess, ok := s.sessionMgr.ApplyUpdates(channel, sessionID, updates)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		s.broadcastSession(sess)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sess)
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sess)
 }
 
 func (s *Server) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +338,100 @@ func (s *Server) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"agents": agents,
 		"count":  len(agents),
+	})
+}
+
+func (s *Server) handleSessionExportAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/export/")
+	if sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	channel := sessionChannelFromRequest(r)
+	sess, ok := s.sessionMgr.Get(channel, sessionID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+
+	data, err := session.ExportSession(sess, session.ExportFormat(format))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	switch format {
+	case "markdown":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=session-%s.md", sessionID))
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=session-%s.json", sessionID))
+	}
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleSessionImportAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Data string `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "invalid request"})
+		return
+	}
+	if req.Data == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "data is required"})
+		return
+	}
+
+	sess, err := session.ImportSession([]byte(req.Data))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": fmt.Sprintf("Import failed: %v", err)})
+		return
+	}
+
+	s.sessionMgr.Update(sess)
+	s.broadcastSession(sess)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(sess)
+}
+
+func (s *Server) handleSessionArchiveAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// /api/sessions/archive/ lists archived sessions
+	archivedSessions := s.sessionMgr.ListArchived()
+	summaries := make([]session.SessionSummary, 0, len(archivedSessions))
+	for _, sess := range archivedSessions {
+		summaries = append(summaries, sess.Summary())
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessions": summaries,
+		"count":    len(summaries),
 	})
 }
 
@@ -573,6 +713,20 @@ func (s *Server) handleRPCRequest(connID string, req *JSONRPCRequest) *JSONRPCRe
 		return s.handleSessionUpdate(connID, req)
 	case "session.delete":
 		return s.handleSessionDelete(connID, req)
+	case "session.rename":
+		return s.handleSessionRename(connID, req)
+	case "session.tag":
+		return s.handleSessionTag(connID, req)
+	case "session.untag":
+		return s.handleSessionUntag(connID, req)
+	case "session.archive":
+		return s.handleSessionArchive(connID, req)
+	case "session.unarchive":
+		return s.handleSessionUnarchive(connID, req)
+	case "session.export":
+		return s.handleSessionExport(connID, req)
+	case "session.import":
+		return s.handleSessionImport(connID, req)
 	case "agents.list":
 		return s.handleAgentsList(connID, req)
 	case "job.submit":
@@ -1100,6 +1254,156 @@ func (s *Server) handleSessionDelete(connID string, req *JSONRPCRequest) *JSONRP
 	s.sessionMgr.Delete(sessionChannelFromParams(params), sessionID)
 	s.broadcastSessionDeleted(sessionID)
 	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"success": true}}
+}
+
+func (s *Server) handleSessionRename(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	name := getStringParam(params, "name")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	if name == "" {
+		return missingParam(req.ID, "name")
+	}
+	sess, found := s.sessionMgr.Rename(sessionChannelFromParams(params), sessionID, name)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
+}
+
+func (s *Server) handleSessionTag(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	tag := getStringParam(params, "tag")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	if tag == "" {
+		return missingParam(req.ID, "tag")
+	}
+	sess, found := s.sessionMgr.AddTag(sessionChannelFromParams(params), sessionID, tag)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
+}
+
+func (s *Server) handleSessionUntag(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	tag := getStringParam(params, "tag")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	if tag == "" {
+		return missingParam(req.ID, "tag")
+	}
+	sess, found := s.sessionMgr.RemoveTag(sessionChannelFromParams(params), sessionID, tag)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
+}
+
+func (s *Server) handleSessionArchive(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	sess, found := s.sessionMgr.Archive(sessionChannelFromParams(params), sessionID)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
+}
+
+func (s *Server) handleSessionUnarchive(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	sess, found := s.sessionMgr.Unarchive(sessionChannelFromParams(params), sessionID)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
+}
+
+func (s *Server) handleSessionExport(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	sess, found := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID)
+	if !found {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+	format := getStringParam(params, "format")
+	if format == "" {
+		format = "json"
+	}
+	data, err := session.ExportSession(sess, session.ExportFormat(format))
+	if err != nil {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: err.Error()}}
+	}
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{
+		"session_id": sessionID,
+		"format":     format,
+		"data":       string(data),
+	}}
+}
+
+func (s *Server) handleSessionImport(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	_ = connID
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	dataStr := getStringParam(params, "data")
+	if dataStr == "" {
+		return missingParam(req.ID, "data")
+	}
+	sess, err := session.ImportSession([]byte(dataStr))
+	if err != nil {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: fmt.Sprintf("Import failed: %v", err)}}
+	}
+	s.sessionMgr.Update(sess)
+	s.broadcastSession(sess)
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: sess}
 }
 
 func (s *Server) handleAgentsList(connID string, req *JSONRPCRequest) *JSONRPCResponse {

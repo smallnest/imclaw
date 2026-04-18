@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(codex:*)",
+      "Bash(gh pr:*)",
+      "Bash(git stash:*)",
+      "Bash(git pull:*)",
+      "Bash(git reset:*)",
+      "Bash(opencode run:*)",
+      "Bash(gh issue:*)",
+      "Bash(go build:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
