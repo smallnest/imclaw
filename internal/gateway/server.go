@@ -16,6 +16,7 @@ import (
 	"github.com/smallnest/imclaw/internal/agent"
 	"github.com/smallnest/imclaw/internal/event"
 	"github.com/smallnest/imclaw/internal/job"
+	"github.com/smallnest/imclaw/internal/metrics"
 	"github.com/smallnest/imclaw/internal/session"
 )
 
@@ -471,6 +472,7 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request) {
 		timeout := time.Duration(req.Timeout) * time.Second
 
 		submittedJob := s.jobMgr.Submit(req.Prompt, req.AgentName, timeout)
+		metrics.Default().Counter(metrics.JobSubmitted).Inc()
 
 		// Start executing the job in background
 		go job.ExecuteJob(context.Background(), s.jobMgr, submittedJob.ID, s.executeJobPrompt)
@@ -537,6 +539,8 @@ func (s *Server) handleJobDetailAPI(w http.ResponseWriter, r *http.Request) {
 
 // executeJobPrompt executes a job prompt using the agent manager
 func (s *Server) executeJobPrompt(ctx context.Context, prompt string, logFn func(level, msg string)) (string, error) {
+	execStart := time.Now()
+
 	// Create a temporary session for this job
 	agentType := "acpx"
 	ag := s.agentMgr.GetOrCreate(agentType)
@@ -556,8 +560,18 @@ func (s *Server) executeJobPrompt(ctx context.Context, prompt string, logFn func
 	})
 	if err != nil {
 		logFn("error", fmt.Sprintf("Execution failed: %v", err))
+		metrics.Default().Counter(metrics.JobFailed).Inc()
+		metrics.Default().Counter(metrics.AgentExecFailures).Inc()
+		metrics.LogEvent("job.failed", sessionID, "", map[string]interface{}{
+			"agent": agentType,
+			"error": truncate(err.Error(), 200),
+		})
 		return "", err
 	}
+
+	metrics.Default().Latency(metrics.JobDuration).Since(execStart)
+	metrics.Default().Counter(metrics.JobCompleted).Inc()
+	metrics.Default().Counter(metrics.OutputSize).Add(int64(len(response)))
 
 	logFn("info", "Execution completed successfully")
 	return response, nil
@@ -583,8 +597,17 @@ func (s *Server) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	start := time.Now()
+	resp := s.handleRPCRequest("", &req)
+
+	metrics.Default().Counter(metrics.RequestTotal).Inc()
+	metrics.Default().Latency(metrics.RequestLatency).Since(start)
+	if resp.Error != nil {
+		metrics.Default().Counter(metrics.RequestErrors).Inc()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.handleRPCRequest("", &req))
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -611,6 +634,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.connectionsMu.Lock()
 	s.connections[wsConn.ID] = wsConn
 	s.connectionsMu.Unlock()
+	metrics.Default().Gauge(metrics.WSConnections).Inc()
 
 	_ = wsConn.SendJSON(JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -662,6 +686,7 @@ func (s *Server) handleWSMessages(conn *WSConnection) {
 		s.connectionsMu.Lock()
 		delete(s.connections, conn.ID)
 		s.connectionsMu.Unlock()
+		metrics.Default().Gauge(metrics.WSConnections).Dec()
 	}()
 
 	_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
@@ -756,6 +781,11 @@ func (s *Server) handleRPCRequest(connID string, req *JSONRPCRequest) *JSONRPCRe
 }
 
 func (s *Server) handleAsk(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	askStart := time.Now()
+	defer func() {
+		metrics.Default().Latency(metrics.SessionPromptLatency).Since(askStart)
+	}()
+
 	params, ok := req.Params.(map[string]interface{})
 	if !ok {
 		return invalidParams(req.ID)
@@ -881,6 +911,11 @@ func (s *Server) relaySubscription(conn *WSConnection, sessionID string, ch <-ch
 }
 
 func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
+	streamStart := time.Now()
+	defer func() {
+		metrics.Default().Latency(metrics.SessionPromptLatency).Since(streamStart)
+	}()
+
 	params, ok := req.Params.(map[string]interface{})
 	if !ok {
 		_ = conn.SendJSON(invalidParams(req.ID))
@@ -925,8 +960,33 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	parser := event.NewParser()
 	sawNativeEvents := false
 	sawErrorEvent := false
+	toolStartTimes := make(map[string]time.Time) // tool name -> start time
 
 	publishAndSend := func(evt agent.Event) {
+		// Track tool call metrics
+		switch evt.Type {
+		case agent.TypeToolStart:
+			toolStartTimes[evt.Name] = time.Now()
+			metrics.Default().Counter(metrics.ToolCallCount).Inc()
+			metrics.LogEvent("tool.start", sess.ID, req.ID, map[string]interface{}{
+				"tool_name": evt.Name,
+			})
+		case agent.TypeToolEnd:
+			if start, ok := toolStartTimes[evt.Name]; ok {
+				metrics.Default().Latency(metrics.ToolCallDuration).Since(start)
+				delete(toolStartTimes, evt.Name)
+			}
+			metrics.LogEvent("tool.end", sess.ID, req.ID, map[string]interface{}{
+				"tool_name":  evt.Name,
+				"input_size": len(evt.Input),
+				"output_size": len(evt.Output),
+			})
+		case agent.TypeError:
+			if evt.Name != "" {
+				metrics.Default().Counter(metrics.ToolCallErrors).Inc()
+			}
+		}
+
 		s.recordEvent(sess.ID, req.ID, evt)
 		// Fan-out to all hub subscribers.
 		s.hub.Publish(sess.ID, HubEvent{Event: evt})
@@ -1039,6 +1099,11 @@ func (s *Server) recordPrompt(sessionID, requestID, prompt string) {
 	if sess, ok := s.sessionMgr.RecordPrompt(defaultSessionChannel, sessionID, requestID, prompt); ok {
 		s.broadcastSession(sess)
 		s.broadcastActivity(sess.ID, sess.Activity[len(sess.Activity)-1])
+		metrics.Default().Counter(metrics.SessionCreated).Inc()
+		metrics.Default().Gauge(metrics.SessionActive).Set(int64(len(s.sessionMgr.Summaries())))
+		metrics.LogEvent("session.prompt", sessionID, requestID, map[string]interface{}{
+			"prompt_length": len(prompt),
+		})
 	}
 }
 
@@ -1053,6 +1118,10 @@ func (s *Server) recordResult(sessionID, requestID, content string) {
 	if sess, ok := s.sessionMgr.RecordResult(defaultSessionChannel, sessionID, requestID, content); ok {
 		s.broadcastSession(sess)
 		s.broadcastActivity(sess.ID, sess.Activity[len(sess.Activity)-1])
+		metrics.Default().Counter(metrics.OutputSize).Add(int64(len(content)))
+		metrics.LogEvent("session.result", sessionID, requestID, map[string]interface{}{
+			"output_length": len(content),
+		})
 	}
 }
 
@@ -1060,6 +1129,10 @@ func (s *Server) recordError(sessionID, requestID, message string) {
 	if sess, ok := s.sessionMgr.RecordError(defaultSessionChannel, sessionID, requestID, message); ok {
 		s.broadcastSession(sess)
 		s.broadcastActivity(sess.ID, sess.Activity[len(sess.Activity)-1])
+		metrics.Default().Counter(metrics.AgentExecFailures).Inc()
+		metrics.LogEvent("session.error", sessionID, requestID, map[string]interface{}{
+			"error_message": truncate(message, 200),
+		})
 	}
 }
 
@@ -1270,6 +1343,13 @@ func resolveSessionID(connID, specifiedSessionID string) string {
 		return connID
 	}
 	return "default"
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func invalidParams(id string) *JSONRPCResponse {

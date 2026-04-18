@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/smallnest/imclaw/internal/agent"
+	"github.com/smallnest/imclaw/internal/metrics"
 )
 
 const (
@@ -63,6 +64,7 @@ func (h *StreamHub) Subscribe(sessionID, subscriberID string) <-chan HubEvent {
 		h.subscribers[sessionID] = make(map[string]chan HubEvent)
 	}
 	h.subscribers[sessionID][subscriberID] = ch
+	metrics.Default().Gauge(metrics.WSSubscribers).Inc()
 	return ch
 }
 
@@ -78,6 +80,7 @@ func (h *StreamHub) Unsubscribe(sessionID, subscriberID string) {
 	if ch, exists := subs[subscriberID]; exists {
 		delete(subs, subscriberID)
 		close(ch)
+		metrics.Default().Gauge(metrics.WSSubscribers).Dec()
 	}
 	if len(subs) == 0 {
 		delete(h.subscribers, sessionID)
@@ -93,6 +96,7 @@ func (h *StreamHub) UnsubscribeAll(subscriberID string) {
 		if ch, exists := subs[subscriberID]; exists {
 			delete(subs, subscriberID)
 			close(ch)
+			metrics.Default().Gauge(metrics.WSSubscribers).Dec()
 		}
 		if len(subs) == 0 {
 			delete(h.subscribers, sessionID)
@@ -127,6 +131,8 @@ func (h *StreamHub) Publish(sessionID string, evt HubEvent) {
 			log.Printf("[stream-hub] Dropping slow subscriber %s for session %s", subID, sessionID)
 			delete(subs, subID)
 			close(ch)
+			metrics.Default().Counter(metrics.WSDroppedSubs).Inc()
+			metrics.Default().Gauge(metrics.WSSubscribers).Dec()
 		}
 	}
 	if len(subs) == 0 {
