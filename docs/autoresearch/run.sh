@@ -1078,12 +1078,30 @@ EOF
         log "合并 PR #$PR_NUMBER..."
         gh pr merge "$PR_NUMBER" --merge --delete-branch
 
+        # 添加评论到 Issue
+        log "添加评论到 Issue #$ISSUE_NUMBER..."
+        gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
+## 自动处理完成
+
+- **PR**: $PR_URL (已合并)
+- **评分**: $FINAL_SCORE/100
+- **迭代次数**: $ITERATION
+- **实现方式**: autoresearch 多 agent 迭代 (${AGENT_NAMES[@]})
+
+该 Issue 已由 autoresearch 自动实现、审核并合并。
+EOF
+)" 2>/dev/null || log "警告: 添加评论失败"
+
+        # 关闭 Issue
+        log "关闭 Issue #$ISSUE_NUMBER..."
+        gh issue close "$ISSUE_NUMBER" --reason completed 2>/dev/null || log "警告: 关闭 Issue 失败 (可能已通过 PR 自动关闭)"
+
         log ""
         log "=========================================="
         log "完成！Issue #$ISSUE_NUMBER 已自动处理"
         log "=========================================="
         log "PR: $PR_URL"
-        log "状态: 已合并"
+        log "状态: 已合并并关闭"
     else
         log "警告: PR 创建失败或已存在"
         log "$PR_URL"

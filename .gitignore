@@ -49,3 +49,4 @@ imclaw
 !imclaw/
 imclaw-cli
 !imclaw-cli/
+.claude
