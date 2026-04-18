@@ -564,7 +564,7 @@ func (s *Server) executeJobPrompt(ctx context.Context, prompt string, logFn func
 		metrics.Default().Counter(metrics.AgentExecFailures).Inc()
 		metrics.LogEvent("job.failed", sessionID, "", map[string]interface{}{
 			"agent": agentType,
-			"error": truncate(err.Error(), 200),
+			"error": metrics.Truncate(err.Error(), 200),
 		})
 		return "", err
 	}
@@ -1131,7 +1131,7 @@ func (s *Server) recordError(sessionID, requestID, message string) {
 		s.broadcastActivity(sess.ID, sess.Activity[len(sess.Activity)-1])
 		metrics.Default().Counter(metrics.AgentExecFailures).Inc()
 		metrics.LogEvent("session.error", sessionID, requestID, map[string]interface{}{
-			"error_message": truncate(message, 200),
+			"error_message": metrics.Truncate(message, 200),
 		})
 	}
 }
@@ -1345,13 +1345,6 @@ func resolveSessionID(connID, specifiedSessionID string) string {
 	return "default"
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
-
 func invalidParams(id string) *JSONRPCResponse {
 	return &JSONRPCResponse{JSONRPC: "2.0", ID: id, Error: &JSONRPCError{Code: -32602, Message: "Invalid params"}}
 }
@@ -1430,6 +1423,8 @@ func (s *Server) handleSessionDelete(connID string, req *JSONRPCRequest) *JSONRP
 	sessionID := getStringParam(params, "session_id")
 	s.sessionMgr.Delete(sessionChannelFromParams(params), sessionID)
 	s.broadcastSessionDeleted(sessionID)
+	metrics.Default().Counter(metrics.SessionDeleted).Inc()
+	metrics.Default().Gauge(metrics.SessionActive).Set(int64(len(s.sessionMgr.Summaries())))
 	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"success": true}}
 }
 

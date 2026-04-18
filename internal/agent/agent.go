@@ -446,7 +446,7 @@ func (a *ACPXAgent) doPrompt(ctx context.Context, sessionID, prompt string, opts
 	args, timeout, format := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, false)
 
 	log.Printf("[acpx] Sending prompt to session %s (%s, format=%s)", sessionID, policy.Summary(), format)
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+	log.Printf("[acpx] Prompt: %s", metrics.Truncate(prompt, 200))
 
 	start := time.Now()
 	response, err := a.runCommand(ctx, timeout, args...)
@@ -475,7 +475,7 @@ func (a *ACPXAgent) doPromptStream(ctx context.Context, sessionID, prompt string
 	args, timeout, _ := buildPromptArgs(a.agentType, sessionID, prompt, opts, policy, true)
 
 	log.Printf("[acpx] Streaming prompt to session %s (%s)", sessionID, policy.Summary())
-	log.Printf("[acpx] Prompt: %s", truncate(prompt, 200))
+	log.Printf("[acpx] Prompt: %s", metrics.Truncate(prompt, 200))
 
 	streamStart := time.Now()
 	ch, err := a.runCommandStream(ctx, timeout, policy, args...)
@@ -1052,14 +1052,6 @@ func startsWithProtocolWhitespace(s string) bool {
 	}
 	r, _ := utf8.DecodeRuneInString(s)
 	return unicode.IsSpace(r)
-}
-
-// truncate truncates a string to maxLen characters
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 // Close closes the agent

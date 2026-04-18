@@ -32,6 +32,17 @@ func TestCounterAdd(t *testing.T) {
 	}
 }
 
+func TestCounterAddNegative(t *testing.T) {
+	r := NewRegistry()
+	c := r.Counter("test.counter_neg")
+
+	c.Add(10)
+	c.Add(-5) // should be ignored
+	if v := c.Value(); v != 10 {
+		t.Fatalf("expected 10 after Add(-5) ignored, got %d", v)
+	}
+}
+
 func TestCounterRegistryReturnsSame(t *testing.T) {
 	r := NewRegistry()
 	c1 := r.Counter("same_name")
@@ -148,6 +159,82 @@ func TestLatencyTrackerEmptySummary(t *testing.T) {
 	}
 }
 
+func TestLatencyTrackerRingBuffer(t *testing.T) {
+	r := NewRegistry()
+	lt := r.Latency("test.ring")
+
+	// Fill beyond maxSamples
+	for i := 0; i < maxSamples+200; i++ {
+		lt.Observe(time.Duration(i) * time.Millisecond)
+	}
+
+	s := lt.Summary()
+	if s.Count != maxSamples {
+		t.Fatalf("expected %d samples (capped), got %d", maxSamples, s.Count)
+	}
+	// After writing maxSamples+200 entries, the ring buffer should contain
+	// the last maxSamples entries: 200..1199
+	// Min should be 200ms
+	if s.Min != 200*time.Millisecond {
+		t.Fatalf("expected min 200ms (oldest retained), got %v", s.Min)
+	}
+	if s.Max != 1199*time.Millisecond {
+		t.Fatalf("expected max 1199ms (newest), got %v", s.Max)
+	}
+}
+
+func TestLatencyTrackerRingBufferExactlyFull(t *testing.T) {
+	r := NewRegistry()
+	lt := r.Latency("test.ring_exact")
+
+	// Fill exactly maxSamples
+	for i := 0; i < maxSamples; i++ {
+		lt.Observe(time.Duration(i) * time.Millisecond)
+	}
+
+	s := lt.Summary()
+	if s.Count != maxSamples {
+		t.Fatalf("expected %d samples, got %d", maxSamples, s.Count)
+	}
+	if s.Min != 0 {
+		t.Fatalf("expected min 0, got %v", s.Min)
+	}
+	if s.Max != (maxSamples-1)*time.Millisecond {
+		t.Fatalf("expected max %dms, got %v", maxSamples-1, s.Max)
+	}
+}
+
+func TestLatencyTrackerConcurrentObserve(t *testing.T) {
+	r := NewRegistry()
+	lt := r.Latency("test.concurrent")
+
+	done := make(chan struct{})
+	const goroutines = 10
+	const perGoroutine = 100
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for i := 0; i < perGoroutine; i++ {
+				lt.Observe(time.Duration(i) * time.Millisecond)
+			}
+		}()
+	}
+
+	for g := 0; g < goroutines; g++ {
+		<-done
+	}
+
+	s := lt.Summary()
+	expected := goroutines * perGoroutine
+	if expected > maxSamples {
+		expected = maxSamples
+	}
+	if s.Count != expected {
+		t.Fatalf("expected %d samples, got %d", expected, s.Count)
+	}
+}
+
 func TestRegistrySnapshot(t *testing.T) {
 	r := NewRegistry()
 	c := r.Counter("snap.counter")
@@ -209,6 +296,25 @@ func TestPredefinedMetricNames(t *testing.T) {
 	for _, name := range names {
 		if name == "" {
 			t.Fatal("empty metric name")
+		}
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		input  string
+		maxLen int
+		want   string
+	}{
+		{"hello", 10, "hello"},
+		{"hello world", 5, "hello..."},
+		{"", 5, ""},
+		{"abc", 3, "abc"},
+	}
+	for _, tt := range tests {
+		got := Truncate(tt.input, tt.maxLen)
+		if got != tt.want {
+			t.Errorf("Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 		}
 	}
 }

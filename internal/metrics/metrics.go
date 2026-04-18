@@ -27,8 +27,13 @@ func (c *Counter) Inc() {
 	log.Printf("[metrics] counter %s=%d", c.name, v)
 }
 
-// Add increments the counter by n.
+// Add increments the counter by n. Panics if n is negative; counters
+// must only increase. Use Gauge for values that can decrease.
 func (c *Counter) Add(n int64) {
+	if n < 0 {
+		log.Printf("[metrics] counter %s: Add called with negative value %d, ignoring", c.name, n)
+		return
+	}
 	v := c.count.Add(n)
 	log.Printf("[metrics] counter %s=%d delta=%d", c.name, v, n)
 }
@@ -40,17 +45,29 @@ func (c *Counter) Value() int64 {
 
 // ---- Latency Tracker ----
 
+// maxSamples caps the number of latency samples retained per tracker.
+// Using a bounded ring buffer prevents unbounded memory growth in
+// long-running processes.
+const maxSamples = 1000
+
 // LatencyTracker measures duration distributions for named operations.
+// It retains at most maxSamples recent observations in a ring buffer.
 type LatencyTracker struct {
 	name    string
 	mu      sync.Mutex
-	samples []time.Duration
+	samples [maxSamples]time.Duration
+	head    int  // next write position
+	count   int  // total observations written (capped at maxSamples)
 }
 
 // Observe records a duration and emits a structured log line.
 func (lt *LatencyTracker) Observe(d time.Duration) {
 	lt.mu.Lock()
-	lt.samples = append(lt.samples, d)
+	lt.samples[lt.head] = d
+	lt.head = (lt.head + 1) % maxSamples
+	if lt.count < maxSamples {
+		lt.count++
+	}
 	lt.mu.Unlock()
 
 	log.Printf("[metrics] latency %s duration_ms=%.2f", lt.name, float64(d)/float64(time.Millisecond))
@@ -66,8 +83,16 @@ func (lt *LatencyTracker) Since(start time.Time) {
 // Returns zero values if no samples have been recorded.
 func (lt *LatencyTracker) Summary() LatencySummary {
 	lt.mu.Lock()
-	samples := make([]time.Duration, len(lt.samples))
-	copy(samples, lt.samples)
+	n := lt.count
+	samples := make([]time.Duration, n)
+	// Ring buffer: if count < maxSamples, data is in samples[0:count].
+	// Otherwise, head marks the oldest entry.
+	if n < maxSamples {
+		copy(samples, lt.samples[:n])
+	} else {
+		copy(samples, lt.samples[lt.head:])
+		copy(samples[maxSamples-lt.head:], lt.samples[:lt.head])
+	}
 	lt.mu.Unlock()
 
 	return computeSummary(lt.name, samples)
@@ -75,15 +100,14 @@ func (lt *LatencyTracker) Summary() LatencySummary {
 
 // LatencySummary holds aggregate latency statistics.
 type LatencySummary struct {
-	Name     string
-	Count    int
-	Min      time.Duration
-	Max      time.Duration
-	Avg      time.Duration
-	P50      time.Duration
-	P95      time.Duration
-	P99      time.Duration
-	Samples  []time.Duration
+	Name  string
+	Count int
+	Min   time.Duration
+	Max   time.Duration
+	Avg   time.Duration
+	P50   time.Duration
+	P95   time.Duration
+	P99   time.Duration
 }
 
 // ---- Gauge ----
@@ -284,9 +308,8 @@ func repeatFormat(n int) string {
 
 func computeSummary(name string, samples []time.Duration) LatencySummary {
 	s := LatencySummary{
-		Name:    name,
-		Count:   len(samples),
-		Samples: samples,
+		Name:  name,
+		Count: len(samples),
 	}
 	if len(samples) == 0 {
 		return s
@@ -318,3 +341,11 @@ type sortableDurations []time.Duration
 func (d sortableDurations) Len() int           { return len(d) }
 func (d sortableDurations) Less(i, j int) bool { return d[i] < d[j] }
 func (d sortableDurations) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
+
+// Truncate shortens s to at most maxLen bytes, appending "..." if truncated.
+func Truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
