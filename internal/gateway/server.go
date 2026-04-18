@@ -49,6 +49,8 @@ type Server struct {
 	connections   map[string]*WSConnection
 	connectionsMu sync.RWMutex
 
+	hub *StreamHub
+
 	running bool
 	mu      sync.RWMutex
 }
@@ -83,6 +85,7 @@ func NewServer(cfg *Config, sessionMgr *session.Manager, agentMgr *agent.Manager
 		jobMgr:      jobMgr,
 		uiHandler:   newUIHandler(cfg != nil && cfg.DevMode),
 		connections: make(map[string]*WSConnection),
+		hub:         NewStreamHub(),
 	}
 }
 
@@ -652,6 +655,7 @@ func (s *Server) authenticateWS(r *http.Request) bool {
 
 func (s *Server) handleWSMessages(conn *WSConnection) {
 	defer func() {
+		s.hub.UnsubscribeAll(conn.ID)
 		conn.cancel()
 		_ = conn.Close()
 		conn.streamWG.Wait()
@@ -691,6 +695,11 @@ func (s *Server) handleWSMessages(conn *WSConnection) {
 			continue
 		}
 
+		if req.Method == "session.subscribe" {
+			s.handleWSSubscribe(conn, &req)
+			continue
+		}
+
 		_ = conn.SendJSON(s.handleRPCRequest(conn.ID, &req))
 	}
 }
@@ -723,6 +732,8 @@ func (s *Server) handleRPCRequest(connID string, req *JSONRPCRequest) *JSONRPCRe
 		return s.handleSessionArchive(connID, req)
 	case "session.unarchive":
 		return s.handleSessionUnarchive(connID, req)
+	case "session.subscribe":
+		return s.handleSessionSubscribe(connID, req)
 	case "session.export":
 		return s.handleSessionExport(connID, req)
 	case "session.import":
@@ -790,6 +801,85 @@ func (s *Server) handleAsk(connID string, req *JSONRPCRequest) *JSONRPCResponse 
 	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": response, "session_id": sess.ID, "agent": ag.Type()}}
 }
 
+func (s *Server) handleSessionSubscribe(connID string, req *JSONRPCRequest) *JSONRPCResponse {
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return invalidParams(req.ID)
+	}
+	sessionID := getStringParam(params, "session_id")
+	if sessionID == "" {
+		return missingParam(req.ID, "session_id")
+	}
+	if connID == "" {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32601, Message: "session.subscribe requires WebSocket connection"}}
+	}
+	// Verify the session exists.
+	if _, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID); !ok {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}}
+	}
+
+	// The actual subscription relay goroutine is spawned by the WS handler.
+	// Store the pending subscription so the WS read loop picks it up.
+	// For the JSON-RPC-over-HTTP path we return a confirmation.
+	return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"subscribed": true, "session_id": sessionID}}
+}
+
+// handleWSSubscribe handles a session.subscribe request over WebSocket.
+// It registers the connection as a subscriber to the session's live stream
+// and starts a goroutine to relay events from the hub to the connection.
+func (s *Server) handleWSSubscribe(conn *WSConnection, req *JSONRPCRequest) {
+	params, ok := req.Params.(map[string]interface{})
+	if !ok {
+		_ = conn.SendJSON(invalidParams(req.ID))
+		return
+	}
+	sessionID := getStringParam(params, "session_id")
+	if sessionID == "" {
+		_ = conn.SendJSON(missingParam(req.ID, "session_id"))
+		return
+	}
+	if _, ok := s.sessionMgr.Get(sessionChannelFromParams(params), sessionID); !ok {
+		_ = conn.SendJSON(&JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32602, Message: "Session not found"}})
+		return
+	}
+
+	ch := s.hub.Subscribe(sessionID, conn.ID)
+
+	_ = conn.SendJSON(&JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"subscribed": true, "session_id": sessionID}})
+
+	conn.streamWG.Add(1)
+	go func() {
+		defer conn.streamWG.Done()
+		defer s.hub.Unsubscribe(sessionID, conn.ID)
+		s.relaySubscription(conn, sessionID, ch)
+	}()
+}
+
+// relaySubscription forwards events from a subscription channel to a WebSocket connection.
+func (s *Server) relaySubscription(conn *WSConnection, sessionID string, ch <-chan HubEvent) {
+	for evt := range ch {
+		switch {
+		case evt.Result != nil:
+			_ = conn.SendJSON(evt.Result)
+		case evt.Error != nil:
+			_ = conn.SendJSON(evt.Error)
+		case evt.Event.Type != "":
+			_ = conn.SendJSON(newEventNotification(sessionID, "", evt.Event))
+		case evt.Chunk.Type != "":
+			_ = conn.SendJSON(JSONRPCRequest{
+				JSONRPC: "2.0",
+				Method:  "stream",
+				Params: map[string]interface{}{
+					"id":         evt.Chunk.ID,
+					"session_id": evt.Chunk.SessionID,
+					"type":       evt.Chunk.Type,
+					"content":    evt.Chunk.Content,
+				},
+			})
+		}
+	}
+}
+
 func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	params, ok := req.Params.(map[string]interface{})
 	if !ok {
@@ -816,7 +906,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(conn.ctx)
+	// Use a standalone context not tied to a single connection so that
+	// the stream survives if the originating client disconnects.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	stream, err := ag.PromptStream(ctx, agentSessionID, content, opts)
@@ -833,6 +925,17 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 	parser := event.NewParser()
 	sawNativeEvents := false
 	sawErrorEvent := false
+
+	publishAndSend := func(evt agent.Event) {
+		s.recordEvent(sess.ID, req.ID, evt)
+		// Fan-out to all hub subscribers.
+		s.hub.Publish(sess.ID, HubEvent{Event: evt})
+		// Also send directly to the originating connection.
+		if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
+			log.Printf("[gateway] WebSocket send failed: %v", err)
+		}
+	}
+
 	for chunk := range stream {
 		applyStreamChunk(&fullContent, &streamErr, chunk)
 		if len(chunk.Events) > 0 {
@@ -847,20 +950,15 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 				finalOutput = evt.Content
 				sawFinalOutput = true
 			}
-			s.recordEvent(sess.ID, req.ID, evt)
-			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
-				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
-				cancel()
-				return
-			}
+			publishAndSend(evt)
 		}
 
 		// Strip ANSI escape sequences from content before sending to WebSocket
 		cleanContent := event.StripANSI(chunk.Content)
+		chunkMsg := StreamChunkMsg{ID: req.ID, SessionID: sess.ID, Type: chunk.Type, Content: cleanContent}
+		s.hub.Publish(sess.ID, HubEvent{Chunk: chunkMsg})
 		if err := conn.SendJSON(JSONRPCRequest{JSONRPC: "2.0", Method: "stream", Params: map[string]interface{}{"id": req.ID, "session_id": sess.ID, "type": chunk.Type, "content": cleanContent}}); err != nil {
-			log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
-			cancel()
-			return
+			log.Printf("[gateway] WebSocket send failed: %v", err)
 		}
 	}
 
@@ -873,12 +971,7 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 				finalOutput = evt.Content
 				sawFinalOutput = true
 			}
-			s.recordEvent(sess.ID, req.ID, evt)
-			if err := conn.SendJSON(newEventNotification(sess.ID, req.ID, evt)); err != nil {
-				log.Printf("[gateway] WebSocket send failed: %v, cancelling stream", err)
-				cancel()
-				return
-			}
+			publishAndSend(evt)
 		}
 	}
 
@@ -886,7 +979,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		if !sawErrorEvent {
 			s.recordError(sess.ID, req.ID, streamErr)
 		}
-		_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: fmt.Sprintf("Agent error: %s", streamErr)}})
+		errResp := JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &JSONRPCError{Code: -32603, Message: fmt.Sprintf("Agent error: %s", streamErr)}}
+		s.hub.Publish(sess.ID, HubEvent{Error: &errResp})
+		_ = conn.SendJSON(errResp)
 		return
 	}
 
@@ -897,7 +992,9 @@ func (s *Server) handleAskStream(conn *WSConnection, req *JSONRPCRequest) {
 		finalContent = filterTranscriptMarkers(event.StripANSI(finalOutput))
 	}
 	s.recordResult(sess.ID, req.ID, finalContent)
-	_ = conn.SendJSON(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}})
+	resultResp := JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"content": finalContent, "session_id": sess.ID, "agent": ag.Type()}}
+	s.hub.Publish(sess.ID, HubEvent{Result: &resultResp})
+	_ = conn.SendJSON(resultResp)
 }
 
 func (s *Server) prepareSession(sessionID, agentType string) *session.Session {

@@ -1,0 +1,9 @@
+### 修改总结
+
+**3 个文件被修改：**
+
+1. **`internal/gateway/stream_hub.go`** — 修复 `Publish` 方法的竞态条件，将 `RLock`+快照模式改为全程写锁保护，避免 `Unsubscribe` 关闭 channel 后 `Publish` 仍尝试发送导致 panic
+
+2. **`internal/gateway/stream_hub_test.go`** — 两处修改：
+   - 移除未使用的 `sync/atomic` import
+   - 修复 `TestStreamHubBackpressureDrop` 测试逻辑，为"快速"订阅者添加并发消费 goroutine
