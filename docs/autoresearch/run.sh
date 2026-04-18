@@ -972,7 +972,6 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     if [ $ITERATION -eq 1 ]; then
         log "本轮: Claude 初始实现"
     else
-        local agent_idx
         agent_idx=$(get_review_agent $ITERATION)
         log "本轮: ${AGENT_NAMES[$agent_idx]} 审核 + 修复"
     fi
@@ -1000,7 +999,6 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     fi
 
     # ---- 迭代 >=2: 三 agent 轮流审核 + 修复 ----
-    local agent_idx
     agent_idx=$(get_review_agent $ITERATION)
     run_review_and_fix $agent_idx
 
