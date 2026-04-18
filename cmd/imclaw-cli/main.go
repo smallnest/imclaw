@@ -54,6 +54,13 @@ var (
 	// Output format
 	format = flag.String("format", "text", "Output format: text, json, quiet")
 
+	// Export format (for session export command)
+	exportFormat = flag.String("export-format", "json", "Export format for session export: json, markdown")
+
+	// Session list filters
+	listTag      = flag.String("tag", "", "Filter session list by tag")
+	listArchived = flag.Bool("archived", false, "Include archived sessions in list")
+
 	// Suppress reads
 	suppressReads = flag.Bool("suppress-reads", false, "Suppress raw read-file contents in output")
 
@@ -93,6 +100,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  job       Manage background jobs\n")
 		fmt.Fprintf(os.Stderr, "            (job submit, job status, job logs, job cancel, job list, job delete)\n")
+		fmt.Fprintf(os.Stderr, "  session   Manage sessions\n")
+		fmt.Fprintf(os.Stderr, "            (session rename, session tag, session untag, session archive, session unarchive,\n")
+		fmt.Fprintf(os.Stderr, "             session export, session import, session list, session get)\n")
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "If message is provided (-p or positional), sends it and exits.\n")
 		fmt.Fprintf(os.Stderr, "If no message, starts interactive REPL mode.\n\n")
@@ -127,6 +137,12 @@ func main() {
 	// Handle job subcommands
 	if len(os.Args) > 1 && os.Args[1] == "job" {
 		handleJobCommand()
+		return
+	}
+
+	// Handle session subcommands
+	if len(os.Args) > 1 && os.Args[1] == "session" {
+		handleSessionCommand()
 		return
 	}
 
@@ -1274,4 +1290,479 @@ func getServerHTTPURL() string {
 	}
 
 	return fmt.Sprintf("%s://%s", scheme, u.Host)
+}
+
+// handleSessionCommand handles session subcommands
+func handleSessionCommand() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Error: session command requires an action\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session <action> [options]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Actions: rename, tag, untag, archive, unarchive, export, import, list, get\n")
+		os.Exit(1)
+	}
+
+	action := os.Args[2]
+
+	// Rebuild args without the "session" prefix for flag parsing
+	sessionArgs := []string{os.Args[0]}
+	if len(os.Args) > 3 {
+		sessionArgs = append(sessionArgs, os.Args[3:]...)
+	}
+
+	// Parse flags for session commands
+	flag.CommandLine.Parse(sessionArgs)
+
+	switch action {
+	case "rename":
+		handleSessionRename()
+	case "tag":
+		handleSessionTag()
+	case "untag":
+		handleSessionUntag()
+	case "archive":
+		handleSessionArchive()
+	case "unarchive":
+		handleSessionUnarchive()
+	case "export":
+		handleSessionExportCmd()
+	case "import":
+		handleSessionImportCmd()
+	case "list":
+		handleSessionList()
+	case "get":
+		handleSessionGetCmd()
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unknown session action: %s\n", action)
+		fmt.Fprintf(os.Stderr, "Valid actions: rename, tag, untag, archive, unarchive, export, import, list, get\n")
+		os.Exit(1)
+	}
+}
+
+func handleSessionRename() {
+	if len(os.Args) < 5 {
+		fmt.Fprintf(os.Stderr, "Error: session rename requires a session ID and name\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session rename <session-id> <name>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	name := os.Args[4]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"name": name}
+	reqJSON, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPatch, serverHTTP+"/api/sessions/"+sessionID, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error renaming session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Session %s renamed to %q\n", sessionID, name)
+}
+
+func handleSessionTag() {
+	if len(os.Args) < 5 {
+		fmt.Fprintf(os.Stderr, "Error: session tag requires a session ID and tag\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session tag <session-id> <tag>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	tag := os.Args[4]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"add_tags": []string{tag}}
+	reqJSON, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPatch, serverHTTP+"/api/sessions/"+sessionID, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error tagging session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Tag %q added to session %s\n", tag, sessionID)
+}
+
+func handleSessionUntag() {
+	if len(os.Args) < 5 {
+		fmt.Fprintf(os.Stderr, "Error: session untag requires a session ID and tag\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session untag <session-id> <tag>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	tag := os.Args[4]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"remove_tags": []string{tag}}
+	reqJSON, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPatch, serverHTTP+"/api/sessions/"+sessionID, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error untagging session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Tag %q removed from session %s\n", tag, sessionID)
+}
+
+func handleSessionArchive() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: session archive requires a session ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session archive <session-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"archived": true}
+	reqJSON, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPatch, serverHTTP+"/api/sessions/"+sessionID, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error archiving session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Session %s archived\n", sessionID)
+}
+
+func handleSessionUnarchive() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: session unarchive requires a session ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session unarchive <session-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"archived": false}
+	reqJSON, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPatch, serverHTTP+"/api/sessions/"+sessionID, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error unarchiving session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Session %s unarchived\n", sessionID)
+}
+
+func handleSessionExportCmd() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: session export requires a session ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session export <session-id> [--export-format json|markdown]\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	expFormat := *exportFormat
+	if expFormat != "json" && expFormat != "markdown" {
+		expFormat = "json"
+	}
+
+	req, err := http.NewRequest(http.MethodGet, serverHTTP+"/api/sessions/export/"+sessionID+"?format="+expFormat, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error exporting session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	fmt.Println(string(body))
+}
+
+func handleSessionImportCmd() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: session import requires a file path\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session import <file>\n", os.Args[0])
+		os.Exit(1)
+	}
+	filePath := os.Args[3]
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	serverHTTP := getServerHTTPURL()
+
+	reqBody := map[string]interface{}{"data": string(data)}
+	reqJSON, _ := json.Marshal(reqBody)
+	resp, err := http.Post(serverHTTP+"/api/sessions/import", "application/json", strings.NewReader(string(reqJSON)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error importing session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusBadRequest {
+		fmt.Fprintf(os.Stderr, "Error: invalid import data: %s\n", string(body))
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d: %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		fmt.Println(string(body))
+		return
+	}
+
+	var sess map[string]interface{}
+	if err := json.Unmarshal(body, &sess); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Session imported successfully\n")
+	fmt.Printf("ID: %v\n", sess["id"])
+	if name, ok := sess["name"].(string); ok && name != "" {
+		fmt.Printf("Name: %s\n", name)
+	}
+	fmt.Printf("Agent: %v\n", sess["agent_name"])
+}
+
+func handleSessionList() {
+	serverHTTP := getServerHTTPURL()
+
+	listURL := serverHTTP + "/api/sessions"
+	params := []string{}
+	if *listTag != "" {
+		params = append(params, "tag="+*listTag)
+	}
+	if *listArchived {
+		params = append(params, "archived=true")
+	}
+	if len(params) > 0 {
+		listURL += "?" + strings.Join(params, "&")
+	}
+
+	resp, err := http.Get(listURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching sessions: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	var result struct {
+		Sessions []map[string]interface{} `json:"sessions"`
+		Count    int                     `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		printJSON(result)
+		return
+	}
+
+	if result.Count == 0 {
+		fmt.Println("No sessions found")
+		return
+	}
+
+	fmt.Printf("Sessions (%d total):\n\n", result.Count)
+	for _, sess := range result.Sessions {
+		name := ""
+		if n, ok := sess["name"].(string); ok && n != "" {
+			name = fmt.Sprintf(" (%s)", n)
+		}
+		fmt.Printf("ID: %v%s\n", sess["id"], name)
+		fmt.Printf("  Agent: %v\n", sess["agent_name"])
+		fmt.Printf("  Status: %v\n", sess["status"])
+		if tags, ok := sess["tags"].([]interface{}); ok && len(tags) > 0 {
+			var tagStrs []string
+			for _, t := range tags {
+				tagStrs = append(tagStrs, fmt.Sprintf("%v", t))
+			}
+			fmt.Printf("  Tags: %s\n", strings.Join(tagStrs, ", "))
+		}
+		if archived, ok := sess["archived"].(bool); ok && archived {
+			fmt.Printf("  Archived: yes\n")
+		}
+		fmt.Printf("  Created: %v\n", sess["created_at"])
+		fmt.Println()
+	}
+}
+
+func handleSessionGetCmd() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Error: session get requires a session ID\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s session get <session-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+	sessionID := os.Args[3]
+	serverHTTP := getServerHTTPURL()
+
+	resp, err := http.Get(serverHTTP + "/api/sessions/" + sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching session: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintf(os.Stderr, "Error: session not found\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: server returned status %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	var sess map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *format == "json" {
+		printJSON(sess)
+		return
+	}
+
+	fmt.Printf("Session: %v\n", sess["id"])
+	if name, ok := sess["name"].(string); ok && name != "" {
+		fmt.Printf("  Name: %s\n", name)
+	}
+	fmt.Printf("  Agent: %v\n", sess["agent_name"])
+	fmt.Printf("  Status: %v\n", sess["status"])
+	fmt.Printf("  Created: %v\n", sess["created_at"])
+	fmt.Printf("  Last Active: %v\n", sess["last_active"])
+	if tags, ok := sess["tags"].([]interface{}); ok && len(tags) > 0 {
+		var tagStrs []string
+		for _, t := range tags {
+			tagStrs = append(tagStrs, fmt.Sprintf("%v", t))
+		}
+		fmt.Printf("  Tags: %s\n", strings.Join(tagStrs, ", "))
+	}
+	if archived, ok := sess["archived"].(bool); ok && archived {
+		fmt.Printf("  Archived: yes\n")
+	}
+	if firstPrompt, ok := sess["first_prompt"].(string); ok && firstPrompt != "" {
+		fmt.Printf("  First Prompt: %s\n", firstPrompt)
+	}
+	if lastPrompt, ok := sess["last_prompt"].(string); ok && lastPrompt != "" {
+		fmt.Printf("  Last Prompt: %s\n", lastPrompt)
+	}
 }

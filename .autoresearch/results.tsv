@@ -1,5 +1,0 @@
-2026-04-03T16:02:59+08:00	7	feat: add permission policy presets and tool-level controls	completed	3	true	8.7	8.7	feature/issue-7	
-2026-04-03T16:52:50+08:00	10	feat: add background jobs and queued task execution	completed	3	true	8.5	8.5	feature/issue-10	
-2026-04-03T17:19:23+08:00	19	fix: job log memory leak and sorting performance	completed	3	true	10	10	feature/issue-19	
-2026-04-03T17:37:02+08:00	20	test: add unit tests for Job API	completed	3	true	9.8	9.8	feature/issue-20	
-2026-04-03T17:47:26+08:00	21	feat: enhance job execution with agent selection and timeout	completed	3	true	9.0	9.0	feature/issue-21	

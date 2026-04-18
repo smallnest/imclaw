@@ -1,5 +1,0 @@
-timestamp	issue_number	issue_title	status	iterations	tests_passed	claude_score	codex_score	branch_name	notes
-2026-04-01T11:33:05+08:00	15	feat: define source-of-truth event protocol from agent layer	blocked	5	false	5	5	feature/issue-15	
-2026-04-01T11:40:53+08:00	15	feat: define source-of-truth event protocol from agent layer	completed	1	true	7	7	feature/issue-15	
-2026-04-01T12:22:34+08:00	15	feat: define source-of-truth event protocol from agent layer	completed	2	true	9.1	9.1	feature/issue-15	
-2026-04-01T14:39:30+08:00	6	feat: add web UI for sessions, streams, and tool activity	completed	5	true	15	15	feature/issue-6	

@@ -43,6 +43,9 @@ type Session struct {
 	AgentName          string                 `json:"agent_name"`
 	AgentSession       string                 `json:"agent_session"`        // ACPX internal session ID
 	AgentSessionHandle string                 `json:"agent_session_handle"` // session handle used for subsequent prompts
+	Name               string                 `json:"name,omitempty"`       // Human-readable session name
+	Tags               []string               `json:"tags,omitempty"`       // User-assigned tags for organization
+	Archived           bool                   `json:"archived"`             // Archived sessions are hidden from default listings
 	CreatedAt          time.Time              `json:"created_at"`
 	LastActive         time.Time              `json:"last_active"`
 	Status             string                 `json:"status"`
@@ -62,6 +65,9 @@ type SessionSummary struct {
 	AccountID   string    `json:"account_id"`
 	ChatID      string    `json:"chat_id"`
 	AgentName   string    `json:"agent_name"`
+	Name        string    `json:"name,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	Archived    bool      `json:"archived"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastActive  time.Time `json:"last_active"`
 	Status      string    `json:"status"`
@@ -122,6 +128,10 @@ func cloneSession(src *Session) *Session {
 		for k, v := range src.Metadata {
 			dst.Metadata[k] = v
 		}
+	}
+	if len(src.Tags) > 0 {
+		dst.Tags = make([]string, len(src.Tags))
+		copy(dst.Tags, src.Tags)
 	}
 	if len(src.Activity) > 0 {
 		dst.Activity = make([]Activity, len(src.Activity))
@@ -219,6 +229,9 @@ func (s *Session) Summary() SessionSummary {
 		AccountID:   s.AccountID,
 		ChatID:      s.ChatID,
 		AgentName:   s.AgentName,
+		Name:        s.Name,
+		Tags:        s.Tags,
+		Archived:    s.Archived,
 		CreatedAt:   s.CreatedAt,
 		LastActive:  s.LastActive,
 		Status:      s.Status,
@@ -315,6 +328,39 @@ func (m *Manager) Summaries() []SessionSummary {
 	return summaries
 }
 
+// SummariesFiltered returns session summaries with optional filtering.
+// When tag is non-empty, only sessions with that tag are returned.
+// When includeArchived is false, archived sessions are excluded.
+func (m *Manager) SummariesFiltered(tag string, includeArchived bool) []SessionSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	summaries := make([]SessionSummary, 0, len(m.sessions))
+	for _, sess := range m.sessions {
+		s := sess.Summary()
+		if !includeArchived && s.Archived {
+			continue
+		}
+		if tag != "" {
+			found := false
+			for _, t := range s.Tags {
+				if t == tag {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		summaries = append(summaries, s)
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].LastActive.After(summaries[j].LastActive)
+	})
+	return summaries
+}
+
 // RecordPrompt appends a prompt activity to the session timeline.
 func (m *Manager) RecordPrompt(channel, chatID, requestID, prompt string) (*Session, bool) {
 	m.mu.Lock()
@@ -381,4 +427,208 @@ func (m *Manager) Cleanup(maxAge time.Duration) int {
 		}
 	}
 	return count
+}
+
+// Rename sets a human-readable name for the session.
+func (m *Manager) Rename(channel, chatID, name string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	sess.Name = name
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// AddTag adds a tag to the session. Returns the updated session or false if not found.
+func (m *Manager) AddTag(channel, chatID, tag string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	for _, t := range sess.Tags {
+		if t == tag {
+			return cloneSession(sess), true
+		}
+	}
+	sess.Tags = append(sess.Tags, tag)
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// RemoveTag removes a tag from the session.
+func (m *Manager) RemoveTag(channel, chatID, tag string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	for i, t := range sess.Tags {
+		if t == tag {
+			sess.Tags = append(sess.Tags[:i], sess.Tags[i+1:]...)
+			break
+		}
+	}
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// SetTags replaces all tags on the session. Duplicate tags are removed.
+func (m *Manager) SetTags(channel, chatID string, tags []string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	sess.Tags = deduplicateTags(tags)
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// Archive marks a session as archived.
+func (m *Manager) Archive(channel, chatID string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	sess.Archived = true
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// Unarchive removes the archived flag from a session.
+func (m *Manager) Unarchive(channel, chatID string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+	sess.Archived = false
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// SessionUpdates contains the fields to update on a session in a single atomic operation.
+type SessionUpdates struct {
+	Name       *string
+	AddTags    []string
+	RemoveTags []string
+	SetTags    []string // If non-nil, replaces all tags (takes precedence over AddTags/RemoveTags)
+	Archived   *bool
+}
+
+// ApplyUpdates atomically applies multiple updates to a session within a single lock.
+// This avoids partial failures from multiple separate lock acquisitions.
+func (m *Manager) ApplyUpdates(channel, chatID string, updates SessionUpdates) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[SessionKey(channel, chatID)]
+	if !ok {
+		return nil, false
+	}
+
+	if updates.Name != nil {
+		sess.Name = *updates.Name
+	}
+
+	if updates.SetTags != nil {
+		sess.Tags = deduplicateTags(updates.SetTags)
+	} else {
+		// Remove tags first, then add
+		if len(updates.RemoveTags) > 0 {
+			for _, tag := range updates.RemoveTags {
+				for i, t := range sess.Tags {
+					if t == tag {
+						sess.Tags = append(sess.Tags[:i], sess.Tags[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+		if len(updates.AddTags) > 0 {
+			existing := make(map[string]bool, len(sess.Tags))
+			for _, t := range sess.Tags {
+				existing[t] = true
+			}
+			for _, tag := range updates.AddTags {
+				if !existing[tag] {
+					sess.Tags = append(sess.Tags, tag)
+					existing[tag] = true
+				}
+			}
+		}
+	}
+
+	if updates.Archived != nil {
+		sess.Archived = *updates.Archived
+	}
+
+	sess.LastActive = time.Now()
+	return cloneSession(sess), true
+}
+
+// deduplicateTags removes duplicate tags while preserving order.
+func deduplicateTags(tags []string) []string {
+	seen := make(map[string]bool, len(tags))
+	result := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if !seen[t] {
+			seen[t] = true
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+// ListByTag returns sessions that have the specified tag.
+func (m *Manager) ListByTag(tag string) []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*Session
+	for _, sess := range m.sessions {
+		for _, t := range sess.Tags {
+			if t == tag {
+				result = append(result, cloneSession(sess))
+				break
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LastActive.After(result[j].LastActive)
+	})
+	return result
+}
+
+// ListArchived returns all archived sessions.
+func (m *Manager) ListArchived() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*Session
+	for _, sess := range m.sessions {
+		if sess.Archived {
+			result = append(result, cloneSession(sess))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LastActive.After(result[j].LastActive)
+	})
+	return result
 }
