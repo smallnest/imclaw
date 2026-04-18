@@ -95,19 +95,20 @@ claude -p "审核 Issue #42 的实现" --dangerously-skip-permissions
 |------|------|
 | `program.md` | 实现规则与约束 |
 | `issue-selector.md` | Issue 选择策略 |
-| `agents/codex.md` | Codex（实现者）提示词 |
-| `agents/claude.md` | Claude（审核者）提示词 |
+| `agents/codex.md` | Codex 提示词 |
+| `agents/claude.md` | Claude 提示词 |
+| `agents/opencode.md` | OpenCode 提示词 |
 
 ## 工作流程
 
 ```
-Issue → Codex实现 → 测试 → Claude审核 → 改进 → ... → 人工审核 → 提交
+Issue → Claude实现 → Codex审核/修复 → OpenCode审核/修复 → Claude审核/修复 → ... → 人工审核 → 提交
 ```
 
 ## 核心规则
 
 - **最大迭代次数**: 默认 42 次，可通过参数指定
-- **通过标准**: 测试通过 + 无严重问题 + 评分 ≥ 8.5
+- **通过标准**: 测试通过 + 无严重问题 + 评分 ≥ 85 (百分制)
 - **人工审核**: 所有代码必须人工审核后才能提交
 - **权限限制**: Agent 不能推送代码、关闭 Issue、修改核心配置
 

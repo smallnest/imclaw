@@ -96,6 +96,8 @@ run_with_retry() {
         local exit_code=1
         if [ "$agent" = "codex" ]; then
             codex exec --full-auto "$prompt" 2>&1 | tee "$log_file" && exit_code=0
+        elif [ "$agent" = "opencode" ]; then
+            opencode run "$prompt" 2>&1 | tee "$log_file" && exit_code=0
         else
             claude -p "$prompt" --dangerously-skip-permissions 2>&1 | tee "$log_file" && exit_code=0
         fi
@@ -194,6 +196,11 @@ check_dependencies() {
 
     if ! command -v codex &> /dev/null; then
         error "codex (OpenAI Codex CLI) 未安装"
+        missing=1
+    fi
+
+    if ! command -v opencode &> /dev/null; then
+        error "opencode CLI 未安装"
         missing=1
     fi
 
@@ -450,6 +457,137 @@ $claude_instructions
     echo "### 迭代 $iteration - Claude (实现)" >> "$WORK_DIR/log.md"
     echo "" >> "$WORK_DIR/log.md"
     echo "详见: [iteration-$iteration-claude.log](./iteration-$iteration-claude.log)" >> "$WORK_DIR/log.md"
+    return 0
+}
+
+run_opencode() {
+    local issue_number=$1
+    local iteration=$2
+    local previous_feedback=$3
+
+    log "迭代 $iteration: OpenCode 实现..."
+
+    # 获取 opencode 指令文件
+    local opencode_instructions_file
+    opencode_instructions_file=$(get_agent_instructions "opencode")
+
+    local opencode_instructions=""
+    if [ -n "$opencode_instructions_file" ]; then
+        opencode_instructions=$(cat "$opencode_instructions_file")
+        log "使用指令文件: $opencode_instructions_file"
+    fi
+
+    local prompt
+    if [ -z "$previous_feedback" ]; then
+        prompt="实现 GitHub Issue #$issue_number
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+Issue 内容: $ISSUE_BODY
+
+迭代次数: $iteration
+
+---
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析 Issue 需求，制定实现计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步实现，每完成一个任务标记为已完成。
+
+---
+$opencode_instructions
+"
+    else
+        prompt="根据审核反馈改进 Issue #$issue_number 的实现
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+
+审核反馈:
+$previous_feedback
+
+---
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析审核反馈，制定修复计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步修复，每完成一个任务标记为已完成。
+
+---
+$opencode_instructions
+"
+    fi
+
+    local log_file="$WORK_DIR/iteration-$iteration-opencode.log"
+
+    cd "$PROJECT_ROOT"
+    if ! run_with_retry opencode "$prompt" "$log_file"; then
+        return 1
+    fi
+
+    echo "" >> "$WORK_DIR/log.md"
+    echo "### 迭代 $iteration - OpenCode (实现)" >> "$WORK_DIR/log.md"
+    echo "" >> "$WORK_DIR/log.md"
+    echo "详见: [iteration-$iteration-opencode.log](./iteration-$iteration-opencode.log)" >> "$WORK_DIR/log.md"
+    return 0
+}
+
+run_opencode_review() {
+    local issue_number=$1
+    local iteration=$2
+
+    log "迭代 $iteration: OpenCode 审核..."
+
+    # 获取 opencode 指令文件
+    local opencode_instructions_file
+    opencode_instructions_file=$(get_agent_instructions "opencode")
+
+    local opencode_instructions=""
+    if [ -n "$opencode_instructions_file" ]; then
+        opencode_instructions=$(cat "$opencode_instructions_file")
+        log "使用指令文件: $opencode_instructions_file"
+    fi
+
+    local prompt="审核 Issue #$issue_number 的实现
+
+项目路径: $PROJECT_ROOT
+Issue 标题: $ISSUE_TITLE
+
+---
+请审核代码并给出评分和改进建议:
+$opencode_instructions
+"
+
+    local log_file="$WORK_DIR/iteration-$iteration-opencode-review.log"
+
+    cd "$PROJECT_ROOT"
+    if ! run_with_retry opencode "$prompt" "$log_file"; then
+        echo "0" > "$WORK_DIR/.last_score"
+        return 1
+    fi
+
+    # 提取评分
+    local score=0
+    local review_result
+    review_result=$(cat "$log_file")
+
+    score=$(extract_score "$review_result")
+
+    if [ -z "$score" ] || [ "$score" = "0" ]; then
+        log "警告: 无法从审核结果中提取评分，默认为 50"
+        score=50
+    fi
+
+    echo "- 审核评分 (OpenCode): $score/100" >> "$WORK_DIR/log.md"
+
+    log "审核评分: $score/100"
+
+    echo "$review_result"
+    echo "$score" > "$WORK_DIR/.last_score"
     return 0
 }
 
@@ -758,34 +896,87 @@ setup_work_directory "$ISSUE_NUMBER"
 # 创建分支
 create_branch "$ISSUE_NUMBER"
 
-# 迭代循环
-# 迭代 1:  Claude 实现
-# 迭代 2:  Codex 审核 + 评分 (未达标则修复)
-# 迭代 3:  Claude 审核 + 修复 (如有必要)
-# 迭代 4:  Codex 审核 + 修复 (如有必要)
+
+# 迭代循环 (三 agent 轮流)
+# Agent 列表: 0=claude, 1=codex, 2=opencode
+# 迭代 1:  Claude 初始实现
+# 迭代 2:  Codex 审核 + 修复
+# 迭代 3:  OpenCode 审核 + 修复
+# 迭代 4:  Claude 审核 + 修复
+# 迭代 5:  Codex 审核 + 修复
+# 迭代 6:  OpenCode 审核 + 修复
 # ...
 # 直到评分 >= PASSING_SCORE 或达到最大迭代次数
+AGENT_NAMES=("claude" "codex" "opencode")
 ITERATION=0
 PREVIOUS_FEEDBACK=""
 FINAL_SCORE=0
 CONSECUTIVE_ITERATION_FAILURES=0
 
+# 辅助函数：根据迭代次数获取 agent 索引 (迭代 >=2 时轮流)
+get_review_agent() {
+    local iter=$1
+    # 迭代 2 开始: (iter-2) % 3 => 0=codex, 1=opencode, 2=claude
+    echo $(( (iter - 2) % 3 ))
+}
+
+run_review_and_fix() {
+    local agent_idx=$1
+    local agent_name="${AGENT_NAMES[$agent_idx]}"
+    local review_func="run_${agent_name}_review"
+    local impl_func="run_${agent_name}"
+
+    # 审核
+    if ! $review_func "$ISSUE_NUMBER" "$ITERATION"; then
+        log "$agent_name 审核失败，跳到下一次迭代"
+        ITERATION_FAILED=1
+        return
+    fi
+
+    REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-${agent_name}-review.log"
+    SCORE=$(get_last_score)
+    FINAL_SCORE=$SCORE
+
+    if check_score_passed "$SCORE"; then
+        log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
+        CONSECUTIVE_ITERATION_FAILURES=0
+        PASSED=1
+        return
+    fi
+
+    log "评分未达标 ($SCORE/$PASSING_SCORE)，$agent_name 根据反馈修复..."
+
+    REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
+    if ! $impl_func "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
+        log "$agent_name 修复失败，跳到下一次迭代"
+        PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
+        ITERATION_FAILED=1
+        return
+    fi
+
+    if ! run_tests "$ITERATION"; then
+        PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+    else
+        PREVIOUS_FEEDBACK=""
+    fi
+}
+
 while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     ITERATION=$((ITERATION + 1))
+    PASSED=0
+    ITERATION_FAILED=0
 
     log ""
     log "=========================================="
     log "迭代 $ITERATION/$MAX_ITERATIONS"
     if [ $ITERATION -eq 1 ]; then
         log "本轮: Claude 初始实现"
-    elif [ $((ITERATION % 2)) -eq 0 ]; then
-        log "本轮: Codex 审核 + 修复"
     else
-        log "本轮: Claude 审核 + 修复"
+        local agent_idx
+        agent_idx=$(get_review_agent $ITERATION)
+        log "本轮: ${AGENT_NAMES[$agent_idx]} 审核 + 修复"
     fi
     log "=========================================="
-
-    ITERATION_FAILED=0
 
     # ---- 迭代 1: Claude 初始实现 ----
     if [ $ITERATION -eq 1 ]; then
@@ -793,7 +984,6 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
             log "Claude 初始实现失败，跳到下一次迭代"
             ITERATION_FAILED=1
         else
-            # 运行测试
             if ! run_tests "$ITERATION"; then
                 log "初始实现测试失败，继续下一轮审核修复"
                 PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
@@ -809,82 +999,13 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
         continue
     fi
 
-    # ---- 偶数轮: Codex 审核 + 修复 ----
-    if [ $((ITERATION % 2)) -eq 0 ]; then
-        # Codex 审核
-        if ! run_codex_review "$ISSUE_NUMBER" "$ITERATION"; then
-            log "Codex 审核失败，跳到下一次迭代"
-            ITERATION_FAILED=1
-        else
-            REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-codex-review.log"
-            SCORE=$(get_last_score)
-            FINAL_SCORE=$SCORE
+    # ---- 迭代 >=2: 三 agent 轮流审核 + 修复 ----
+    local agent_idx
+    agent_idx=$(get_review_agent $ITERATION)
+    run_review_and_fix $agent_idx
 
-            if check_score_passed "$SCORE"; then
-                log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
-                CONSECUTIVE_ITERATION_FAILURES=0
-                break
-            fi
-
-            log "评分未达标 ($SCORE/$PASSING_SCORE)，Codex 根据反馈修复..."
-
-            REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
-            if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
-                log "Codex 修复失败，跳到下一次迭代"
-                PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
-                ITERATION_FAILED=1
-            else
-                if ! run_tests "$ITERATION"; then
-                    PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
-                else
-                    PREVIOUS_FEEDBACK=""
-                fi
-            fi
-        fi
-
-        if [ $ITERATION_FAILED -eq 1 ]; then
-            CONSECUTIVE_ITERATION_FAILURES=$((CONSECUTIVE_ITERATION_FAILURES + 1))
-        else
-            CONSECUTIVE_ITERATION_FAILURES=0
-        fi
-
-        if [ $CONSECUTIVE_ITERATION_FAILURES -ge 2 ]; then
-            error "连续 $CONSECUTIVE_ITERATION_FAILURES 次迭代失败，停止运行"
-            record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
-            exit 1
-        fi
-        continue
-    fi
-
-    # ---- 奇数轮 (>=3): Claude 审核 + 修复 ----
-    if ! run_claude_review "$ISSUE_NUMBER" "$ITERATION"; then
-        log "Claude 审核失败，跳到下一次迭代"
-        ITERATION_FAILED=1
-    else
-        REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-claude-review.log"
-        SCORE=$(get_last_score)
-        FINAL_SCORE=$SCORE
-
-        if check_score_passed "$SCORE"; then
-            log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
-            CONSECUTIVE_ITERATION_FAILURES=0
-            break
-        fi
-
-        log "评分未达标 ($SCORE/$PASSING_SCORE)，Claude 根据反馈修复..."
-
-        REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
-        if ! run_claude "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
-            log "Claude 修复失败，跳到下一次迭代"
-            PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
-            ITERATION_FAILED=1
-        else
-            if ! run_tests "$ITERATION"; then
-                PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
-            else
-                PREVIOUS_FEEDBACK=""
-            fi
-        fi
+    if [ $PASSED -eq 1 ]; then
+        break
     fi
 
     if [ $ITERATION_FAILED -eq 1 ]; then
@@ -898,7 +1019,6 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
         record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
         exit 1
     fi
-    continue
 done
 
 # ---- 判断最终结果 ----
