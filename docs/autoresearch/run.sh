@@ -30,9 +30,8 @@ fi
 
 # ==================== 配置 ====================
 DEFAULT_MAX_ITERATIONS=42
-PASSING_SCORE=9.0
-MAX_CONSECUTIVE_FAILURES=3  # 连续失败最大次数
-MAX_RETRIES=10              # 退火重试最大次数
+PASSING_SCORE=85=3  # 连续失败最大次数
+MAX_RETRIES=5              # 退火重试最大次数
 RETRY_BASE_DELAY=2          # 退火重试初始等待时间（秒）
 RETRY_MAX_DELAY=60          # 退火重试最大等待时间（秒）
 
@@ -137,7 +136,7 @@ usage() {
     echo "  max_iterations   最大迭代次数 (默认: $DEFAULT_MAX_ITERATIONS)"
     echo ""
     echo "配置:"
-    echo "  PASSING_SCORE=9.0              达标评分线"
+    echo "  PASSING_SCORE=85               达标评分线 (百分制)"
     echo "  MAX_CONSECUTIVE_FAILURES=3     连续失败最大次数"
     echo ""
     echo "自定义配置文件 (可选):"
@@ -328,7 +327,15 @@ Issue 内容: $ISSUE_BODY
 迭代次数: $iteration
 
 ---
-请按照以下指令执行:
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析 Issue 需求，制定实现计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步实现，每完成一个任务标记为已完成。
+
+---
 $codex_instructions
 "
     else
@@ -341,7 +348,15 @@ Issue 标题: $ISSUE_TITLE
 $previous_feedback
 
 ---
-请按照以下指令执行:
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析审核反馈，制定修复计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步修复，每完成一个任务标记为已完成。
+
+---
 $codex_instructions
 "
     fi
@@ -389,7 +404,15 @@ Issue 内容: $ISSUE_BODY
 迭代次数: $iteration
 
 ---
-请实现以下功能:
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析 Issue 需求，制定实现计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步实现，每完成一个任务标记为已完成。
+
+---
 $claude_instructions
 "
     else
@@ -402,7 +425,15 @@ Issue 标题: $ISSUE_TITLE
 $previous_feedback
 
 ---
-请根据反馈修复代码:
+请按以下步骤执行:
+
+## 第一步：制定计划
+分析审核反馈，制定修复计划，拆解为具体的 tasks/todos，输出任务清单。
+
+## 第二步：逐步实现
+按照任务清单逐步修复，每完成一个任务标记为已完成。
+
+---
 $claude_instructions
 "
     fi
@@ -484,45 +515,21 @@ $claude_instructions
         return 1
     fi
 
-    # 提取评分 - 兼容 macOS (不使用 grep -P)，支持小数
+    # 提取评分
     local score=0
     local review_result
     review_result=$(cat "$log_file")
 
-    # 尝试多种格式匹配
-    # 格式1: 评分: X/10 或 Score: X/10 (支持小数如 8.5)
-    local score_line
-    score_line=$(echo "$review_result" | grep -E "评分:|Score:" | head -1)
-
-    if [ -n "$score_line" ]; then
-        # 提取数字（包括小数）
-        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-    fi
-
-    # 格式2: X/10 或 X.Y/10 格式
-    if [ -z "$score" ] || [ "$score" = "0" ]; then
-        score_line=$(echo "$review_result" | grep -E '[0-9]+\.?[0-9]*/10' | head -1)
-        if [ -n "$score_line" ]; then
-            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-        fi
-    fi
-
-    # 格式3: **评分: X/10** markdown 格式
-    if [ -z "$score" ] || [ "$score" = "0" ]; then
-        score_line=$(echo "$review_result" | grep -E '\*\*评分' | head -1)
-        if [ -n "$score_line" ]; then
-            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-        fi
-    fi
+    score=$(extract_score "$review_result")
 
     if [ -z "$score" ] || [ "$score" = "0" ]; then
-        log "警告: 无法从审核结果中提取评分，默认为 5"
-        score=5
+        log "警告: 无法从审核结果中提取评分，默认为 50"
+        score=50
     fi
 
-    echo "- 审核评分 (Claude): $score/10" >> "$WORK_DIR/log.md"
+    echo "- 审核评分 (Claude): $score/100" >> "$WORK_DIR/log.md"
 
-    log "审核评分: $score/10"
+    log "审核评分: $score/100"
 
     echo "$review_result"
     # 通过文件传递评分（避免 return 值限制）
@@ -565,45 +572,105 @@ $codex_instructions
         return 1
     fi
 
-    # 提取评分 - 兼容 macOS (不使用 grep -P)，支持小数
+    # 提取评分
     local score=0
     local review_result
     review_result=$(cat "$log_file")
 
-    # 尝试多种格式匹配
-    local score_line
-    score_line=$(echo "$review_result" | grep -E "评分:|Score:" | head -1)
-
-    if [ -n "$score_line" ]; then
-        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-    fi
+    score=$(extract_score "$review_result")
 
     if [ -z "$score" ] || [ "$score" = "0" ]; then
-        score_line=$(echo "$review_result" | grep -E '[0-9]+\.?[0-9]*/10' | head -1)
-        if [ -n "$score_line" ]; then
-            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-        fi
+        log "警告: 无法从审核结果中提取评分，默认为 50"
+        score=50
     fi
 
-    if [ -z "$score" ] || [ "$score" = "0" ]; then
-        score_line=$(echo "$review_result" | grep -E '\*\*评分' | head -1)
-        if [ -n "$score_line" ]; then
-            score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
-        fi
-    fi
+    echo "- 审核评分 (Codex): $score/100" >> "$WORK_DIR/log.md"
 
-    if [ -z "$score" ] || [ "$score" = "0" ]; then
-        log "警告: 无法从审核结果中提取评分，默认为 5"
-        score=5
-    fi
-
-    echo "- 审核评分 (Codex): $score/10" >> "$WORK_DIR/log.md"
-
-    log "审核评分: $score/10"
+    log "审核评分: $score/100"
 
     echo "$review_result"
     echo "$score" > "$WORK_DIR/.last_score"
     return 0
+}
+
+# 从审核结果中提取评分
+# 支持百分制 (X/100) 和 10 分制 (X/10 或纯数字 <=10)，自动转换为百分制
+extract_score() {
+    local review_result="$1"
+    local score=0
+    local score_line
+
+    # 格式1: 明确的百分制 X/100
+    score_line=$(echo "$review_result" | grep -Eo '[0-9]+\.?[0-9]*(\s*/\s*100)' | head -1)
+    if [ -n "$score_line" ]; then
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        echo "$score"
+        return
+    fi
+
+    # 格式2: **评分: X/100** 或 **Score: X/100**
+    score_line=$(echo "$review_result" | grep -E '\*\*(评分|Score)[^*]*100' | head -1)
+    if [ -n "$score_line" ]; then
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        echo "$score"
+        return
+    fi
+
+    # 格式3: 总分行 (表格中的 **总分** 或 总分|)
+    score_line=$(echo "$review_result" | grep -E '(\*\*)?总分(\*\*)?\s*\|.*\*\*[0-9]' | head -1)
+    if [ -z "$score_line" ]; then
+        score_line=$(echo "$review_result" | grep -E '总分.*→' | head -1)
+    fi
+    if [ -n "$score_line" ]; then
+        # 提取最后一个数字（四舍五入后的值）
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | tail -1)
+        if [ -n "$score" ]; then
+            # 10 分制转百分制
+            score=$(awk -v s="$score" 'BEGIN { printf "%.0f", s * 10 }')
+            echo "$score"
+            return
+        fi
+    fi
+
+    # 格式4: 评分: X/10 或 Score: X/10
+    score_line=$(echo "$review_result" | grep -Eo '[0-9]+\.?[0-9]*(\s*/\s*10)' | head -1)
+    if [ -n "$score_line" ]; then
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        if [ -n "$score" ]; then
+            score=$(awk -v s="$score" 'BEGIN { printf "%.0f", s * 10 }')
+            echo "$score"
+            return
+        fi
+    fi
+
+    # 格式5: **评分: X** 或 **Score: X** (无 /100 或 /10)
+    score_line=$(echo "$review_result" | grep -E '\*\*(评分|Score)' | head -1)
+    if [ -n "$score_line" ]; then
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        if [ -n "$score" ]; then
+            # 判断是百分制还是 10 分制
+            if awk -v s="$score" 'BEGIN { exit (s <= 10) ? 0 : 1 }'; then
+                score=$(awk -v s="$score" 'BEGIN { printf "%.0f", s * 10 }')
+            fi
+            echo "$score"
+            return
+        fi
+    fi
+
+    # 格式6: 普通行 "评分: X" 或 "Score: X"
+    score_line=$(echo "$review_result" | grep -E '(评分|Score)\s*:' | grep -v '各维度\|维度' | head -1)
+    if [ -n "$score_line" ]; then
+        score=$(echo "$score_line" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+        if [ -n "$score" ]; then
+            if awk -v s="$score" 'BEGIN { exit (s <= 10) ? 0 : 1 }'; then
+                score=$(awk -v s="$score" 'BEGIN { printf "%.0f", s * 10 }')
+            fi
+            echo "$score"
+            return
+        fi
+    fi
+
+    echo "0"
 }
 
 # 比较浮点数评分是否达标
@@ -655,7 +722,7 @@ record_final_result() {
 
 ## 最终结果
 - 总迭代次数: $iterations
-- 最终评分: $final_score/10
+- 最终评分: $final_score/100
 - 状态: $status
 - 分支: $BRANCH_NAME
 - 结束时间: $(date '+%Y-%m-%d %H:%M:%S')
@@ -692,16 +759,16 @@ setup_work_directory "$ISSUE_NUMBER"
 create_branch "$ISSUE_NUMBER"
 
 # 迭代循环
-# 迭代 1:  Codex 实现
-# 迭代 2:  Claude 审核 + 评分 (未达标则修复)
-# 迭代 3:  Codex 审核 + 修复 (如有必要)
-# 迭代 4:  Claude 审核 + 修复 (如有必要)
+# 迭代 1:  Claude 实现
+# 迭代 2:  Codex 审核 + 评分 (未达标则修复)
+# 迭代 3:  Claude 审核 + 修复 (如有必要)
+# 迭代 4:  Codex 审核 + 修复 (如有必要)
 # ...
 # 直到评分 >= PASSING_SCORE 或达到最大迭代次数
 ITERATION=0
 PREVIOUS_FEEDBACK=""
 FINAL_SCORE=0
-CONSECUTIVE_FAILURES=0
+CONSECUTIVE_ITERATION_FAILURES=0
 
 while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     ITERATION=$((ITERATION + 1))
@@ -710,110 +777,127 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     log "=========================================="
     log "迭代 $ITERATION/$MAX_ITERATIONS"
     if [ $ITERATION -eq 1 ]; then
-        log "本轮: Codex 初始实现"
+        log "本轮: Claude 初始实现"
     elif [ $((ITERATION % 2)) -eq 0 ]; then
-        log "本轮: Claude 审核 + 修复"
-    else
         log "本轮: Codex 审核 + 修复"
+    else
+        log "本轮: Claude 审核 + 修复"
     fi
     log "=========================================="
 
-    CONSECUTIVE_FAILURES=0
+    ITERATION_FAILED=0
 
-    # ---- 迭代 1: Codex 初始实现 ----
+    # ---- 迭代 1: Claude 初始实现 ----
     if [ $ITERATION -eq 1 ]; then
-        if ! run_codex "$ISSUE_NUMBER" "$ITERATION" ""; then
-            error "Codex 初始实现失败"
-            record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
-            exit 1
+        if ! run_claude "$ISSUE_NUMBER" "$ITERATION" ""; then
+            log "Claude 初始实现失败，跳到下一次迭代"
+            ITERATION_FAILED=1
+        else
+            # 运行测试
+            if ! run_tests "$ITERATION"; then
+                log "初始实现测试失败，继续下一轮审核修复"
+                PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+            fi
+            PREVIOUS_FEEDBACK="初始实现完成，请审核代码质量并给出评分。如果有问题请直接修复。"
         fi
 
-        # 运行测试
-        if ! run_tests "$ITERATION"; then
-            log "初始实现测试失败，继续下一轮审核修复"
-            PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+        if [ $ITERATION_FAILED -eq 1 ]; then
+            CONSECUTIVE_ITERATION_FAILURES=$((CONSECUTIVE_ITERATION_FAILURES + 1))
+        else
+            CONSECUTIVE_ITERATION_FAILURES=0
         fi
-
-        # 初始实现后不评分，直接进入下一轮
-        PREVIOUS_FEEDBACK="初始实现完成，请审核代码质量并给出评分。如果有问题请直接修复。"
         continue
     fi
 
-    # ---- 偶数轮: Claude 审核 + 修复 ----
+    # ---- 偶数轮: Codex 审核 + 修复 ----
     if [ $((ITERATION % 2)) -eq 0 ]; then
-        # Claude 审核
-        if ! run_claude_review "$ISSUE_NUMBER" "$ITERATION"; then
-            CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
-            log "Claude 审核失败"
-            sleep 10
-            ITERATION=$((ITERATION - 1))  # 重试本轮
-            continue
+        # Codex 审核
+        if ! run_codex_review "$ISSUE_NUMBER" "$ITERATION"; then
+            log "Codex 审核失败，跳到下一次迭代"
+            ITERATION_FAILED=1
+        else
+            REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-codex-review.log"
+            SCORE=$(get_last_score)
+            FINAL_SCORE=$SCORE
+
+            if check_score_passed "$SCORE"; then
+                log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
+                CONSECUTIVE_ITERATION_FAILURES=0
+                break
+            fi
+
+            log "评分未达标 ($SCORE/$PASSING_SCORE)，Codex 根据反馈修复..."
+
+            REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
+            if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
+                log "Codex 修复失败，跳到下一次迭代"
+                PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
+                ITERATION_FAILED=1
+            else
+                if ! run_tests "$ITERATION"; then
+                    PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+                else
+                    PREVIOUS_FEEDBACK=""
+                fi
+            fi
         fi
 
+        if [ $ITERATION_FAILED -eq 1 ]; then
+            CONSECUTIVE_ITERATION_FAILURES=$((CONSECUTIVE_ITERATION_FAILURES + 1))
+        else
+            CONSECUTIVE_ITERATION_FAILURES=0
+        fi
+
+        if [ $CONSECUTIVE_ITERATION_FAILURES -ge 2 ]; then
+            error "连续 $CONSECUTIVE_ITERATION_FAILURES 次迭代失败，停止运行"
+            record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
+            exit 1
+        fi
+        continue
+    fi
+
+    # ---- 奇数轮 (>=3): Claude 审核 + 修复 ----
+    if ! run_claude_review "$ISSUE_NUMBER" "$ITERATION"; then
+        log "Claude 审核失败，跳到下一次迭代"
+        ITERATION_FAILED=1
+    else
         REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-claude-review.log"
         SCORE=$(get_last_score)
         FINAL_SCORE=$SCORE
 
         if check_score_passed "$SCORE"; then
-            log "审核通过！评分: $SCORE/10 (达标线: $PASSING_SCORE)"
+            log "审核通过！评分: $SCORE/100 (达标线: $PASSING_SCORE)"
+            CONSECUTIVE_ITERATION_FAILURES=0
             break
         fi
 
         log "评分未达标 ($SCORE/$PASSING_SCORE)，Claude 根据反馈修复..."
 
-        # Claude 根据审核反馈修复
         REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
         if ! run_claude "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
-            log "Claude 修复失败，继续下一轮"
+            log "Claude 修复失败，跳到下一次迭代"
             PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
-            continue
-        fi
-
-        # 修复后运行测试
-        if ! run_tests "$ITERATION"; then
-            PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+            ITERATION_FAILED=1
         else
-            PREVIOUS_FEEDBACK=""
+            if ! run_tests "$ITERATION"; then
+                PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+            else
+                PREVIOUS_FEEDBACK=""
+            fi
         fi
-
-        continue
     fi
 
-    # ---- 奇数轮 (>=3): Codex 审核 + 修复 ----
-    if ! run_codex_review "$ISSUE_NUMBER" "$ITERATION"; then
-        CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
-        log "Codex 审核失败"
-        sleep 10
-        ITERATION=$((ITERATION - 1))  # 重试本轮
-        continue
-    fi
-
-    REVIEW_LOG_FILE="$WORK_DIR/iteration-$ITERATION-codex-review.log"
-    SCORE=$(get_last_score)
-    FINAL_SCORE=$SCORE
-
-    if check_score_passed "$SCORE"; then
-        log "审核通过！评分: $SCORE/10 (达标线: $PASSING_SCORE)"
-        break
-    fi
-
-    log "评分未达标 ($SCORE/$PASSING_SCORE)，Codex 根据反馈修复..."
-
-    # Codex 根据审核反馈修复
-    REVIEW_FEEDBACK=$(cat "$REVIEW_LOG_FILE")
-    if ! run_codex "$ISSUE_NUMBER" "$ITERATION" "$REVIEW_FEEDBACK"; then
-        log "Codex 修复失败，继续下一轮"
-        PREVIOUS_FEEDBACK="$REVIEW_FEEDBACK"
-        continue
-    fi
-
-    # 修复后运行测试
-    if ! run_tests "$ITERATION"; then
-        PREVIOUS_FEEDBACK="测试失败，请检查测试输出并修复问题。"
+    if [ $ITERATION_FAILED -eq 1 ]; then
+        CONSECUTIVE_ITERATION_FAILURES=$((CONSECUTIVE_ITERATION_FAILURES + 1))
     else
-        PREVIOUS_FEEDBACK=""
+        CONSECUTIVE_ITERATION_FAILURES=0
     fi
 
+    if [ $CONSECUTIVE_ITERATION_FAILURES -ge 2 ]; then
+        error "连续 $CONSECUTIVE_ITERATION_FAILURES 次迭代失败，停止运行"
+        record_final_result "$ISSUE_NUMBER" "agent_failed" "$ITERATION" "$FINAL_SCORE"
+        exit 1
+    fi
     continue
 done
 
@@ -826,7 +910,7 @@ if check_score_passed "$FINAL_SCORE"; then
     log "处理完成！"
     log "=========================================="
     log "分支: $BRANCH_NAME"
-    log "评分: $FINAL_SCORE/10"
+    log "评分: $FINAL_SCORE/100"
     log "迭代次数: $ITERATION"
 
     # 自动提交 PR 并合并
@@ -842,7 +926,7 @@ if check_score_passed "$FINAL_SCORE"; then
     git add -A
     git commit -m "feat: implement issue #$ISSUE_NUMBER - $ISSUE_TITLE
 
-Implemented by autoresearch with score $FINAL_SCORE/10 after $ITERATION iterations.
+Implemented by autoresearch with score $FINAL_SCORE/100 after $ITERATION iterations.
 
 Closes #$ISSUE_NUMBER" 2>/dev/null || log "没有需要提交的更改"
 
@@ -855,7 +939,7 @@ Closes #$ISSUE_NUMBER" 2>/dev/null || log "没有需要提交的更改"
     PR_URL=$(gh pr create --title "feat: $ISSUE_TITLE (#$ISSUE_NUMBER)" --body "$(cat <<EOF
 ## Summary
 - Implements #$ISSUE_NUMBER
-- Score: $FINAL_SCORE/10
+- Score: $FINAL_SCORE/100
 - Iterations: $ITERATION
 
 ## Test plan
@@ -893,7 +977,7 @@ log ""
 log "=========================================="
 log "达到最大迭代次数，仍未通过审核"
 log "=========================================="
-log "最终评分: $FINAL_SCORE/10"
+log "最终评分: $FINAL_SCORE/100"
 log "请人工介入处理"
 
 record_final_result "$ISSUE_NUMBER" "blocked" "$ITERATION" "$FINAL_SCORE"
